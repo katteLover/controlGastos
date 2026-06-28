@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "functions": {
+    "app/api/procesar/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "app/api/compras/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}
