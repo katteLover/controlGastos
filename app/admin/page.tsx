@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { formatCurrency } from '@/lib/utils';
-import { supabaseClient } from '@/lib/supabase-client';
+import { formatCurrency } from '../../lib/utils';
+import { supabaseClient } from '../../lib/supabase-client';
 import { Shield, Users, BarChart3, TrendingUp, RefreshCw } from 'lucide-react';
-import { Profile } from '@/types';
+import { Profile } from '../../types';
 
 export default function AdminPage() {
   const [data, setData] = useState<any>(null);
