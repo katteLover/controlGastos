@@ -8,9 +8,6 @@ export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
-  // ... (aquí va todo el código que programamos antes)
-}
-export async function POST(req: Request) {
   try {
     // 1. Verificación de Autenticación Segura en el Servidor
     const token = req.headers.get('Authorization')?.replace('Bearer ', '') || 
