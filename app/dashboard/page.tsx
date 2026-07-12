@@ -5,7 +5,7 @@ import { useCompras } from '@/hooks/useCompras';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { DollarSign, Receipt, Calendar, Tag, Search, Plus, Trash2, Eye } from 'lucide-react';
-import <ExportButtons purchases={purchases} />
+import ExportButtons from '@/components/ExportButtons';
 
 export default function DashboardPage() {
   const { purchases, loading, filters, setFilters, refetch } = useCompras();
@@ -100,7 +100,12 @@ export default function DashboardPage() {
           <p className="text-gray-500 text-sm">Gestiona e inspecciona tus comprobantes analizados con IA</p>
         </div>
       </div>
+    <div className="flex justify-between items-center mb-6">
+     <h1 className="text-2xl font-bold">Mi Dashboard</h1>
 
+  {/* Renderizamos el componente aquí pasando los datos */}
+  <ExportButtons purchases={purchases} />
+</div>
       {/* FILA DE FILTROS */}
       <div className="bg-white dark:bg-dark-card p-4 rounded-xl shadow-sm border border-emerald-50 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
         <div>
