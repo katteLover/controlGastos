@@ -1,5 +1,4 @@
 import { clsx, type ClassValue } from "clsx";
-import { SampleColors } from "tailwind-merge"; // helper de unión si es necesario, usamos twMerge customizado
 import { twMerge } from "tailwind-merge";
 
 // Utilidad para combinar clases de Tailwind condicionales sin conflictos
