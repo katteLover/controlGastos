@@ -29,15 +29,15 @@ export async function middleware(req: NextRequest) {
   const { pathname } = url;
 
   // 1. Definición de rutas
-  const isPublicRoute = ['/', '/login', '/register', '/auth/callback'].includes(pathname); [cite: 84]
+  const isPublicRoute = ['/', '/login', '/register', '/auth/callback'].includes(pathname); 
   const isProtectedRoute = pathname.startsWith('/dashboard') || 
                             pathname.startsWith('/admin') || 
                             pathname.startsWith('/settings') || 
-                            (pathname.startsWith('/api') && !pathname.startsWith('/api/public')); [cite: 85]
+                            (pathname.startsWith('/api') && !pathname.startsWith('/api/public'));
 
   // 2. Redirección por falta de autenticación
   if (!user && isProtectedRoute) {
-    url.pathname = '/login'; [cite: 86]
+    url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
@@ -48,7 +48,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // 4. Protección específica para la ruta /admin (Solo rol 'admin')
-  if (user && pathname.startsWith('/admin')) { [cite: 11]
+  if (user && pathname.startsWith('/admin')) {
     // Usamos el cliente del servidor para validar el rol de forma segura en la DB
     const serverSupabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -62,7 +62,7 @@ export async function middleware(req: NextRequest) {
       .single();
 
     if (!profile || profile.role !== 'admin') {
-      url.pathname = '/dashboard'; [cite: 87]
+      url.pathname = '/dashboard'; 
       return NextResponse.redirect(url); // Redirige si es un 'user' ordinario
     }
   }
