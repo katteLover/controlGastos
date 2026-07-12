@@ -16,9 +16,6 @@ export async function analyzeTicket(base64Data: string, mimeType: string) {
   // Inicializamos el modelo optimizado para visión y estructuración JSON rápida
   const model = genAI.getGenerativeModel({
     model: 'gemini-1.5-flash',
-    generationConfig: {
-      responseMimeType: 'application/json', // Garantiza que la salida sea JSON válido
-    },
   });
 
   const prompt = `
