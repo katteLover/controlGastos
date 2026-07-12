@@ -2,7 +2,7 @@
 export interface Profile {
   id: string;
   full_name: string | null;
-  role: 'user' | 'admin'; [cite: 8]
+  role: 'user' | 'admin';
 }
 
 // Registro de compra/ticket [cite: 14]
