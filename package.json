@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.1.0",
+    "@supabase/auth-helpers-nextjs": "^0.15.0",
+    "@supabase/auth-helpers-react": "^0.15.0",
     "@supabase/supabase-js": "^2.39.8",
     "clsx": "^2.1.0",
     "html2canvas": "^1.4.1",

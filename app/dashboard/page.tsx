@@ -1,300 +1,122 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { useCompras } from '@/hooks/useCompras';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
-import { DollarSign, Receipt, Calendar, Tag, Search, Plus, Trash2, Eye } from 'lucide-react';
-import ExportButtons from '@/components/ExportButtons';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // Asegúrate de tener esta dependencia instalada
 
-export default function DashboardPage() {
-  const { purchases, loading, filters, setFilters, refetch } = useCompras();
-  const [paginaActual, setPaginaActual] = useState(1);
-  const [selectedPurchase, setSelectedPurchase] = useState<any>(null);
+export default function Dashboard() {
+  const router = useRouter();
+  const supabase = createClientComponentClient();
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // 1. CÁLCULOS AGREGADOS PARA LAS TARGETAS DE RESUMEN
-  const stats = useMemo(() => {
-    let totalGasto = 0;
-    const categoriasMapa: { [key: string]: number } = {};
-    const diasUnicos = new Set<string>();
+  // Función para cerrar sesión
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.refresh();
+    router.push('/login');
+  };
 
-    purchases.forEach(p => {
-      totalGasto += Number(p.total);
-      diasUnicos.add(p.fecha);
-      
-      // Mapear gastos por categorías desde los productos hijos
-      if ((p as any).products) {
-        (p as any).products.forEach((prod: any) => {
-          categoriasMapa[prod.categoria] = (categoriasMapa[prod.categoria] || 0) + Number(prod.precio_total);
-        });
-      }
-    });
+  // Función simulada para subir el ticket (conectarás con tu API de compras/Gemini)
+  const handleUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return alert('Por favor, selecciona un archivo primero');
 
-    // Encontrar la categoría con mayor peso financiero
-    let maxCat = 'Ninguna';
-    let maxGasto = 0;
-    Object.entries(categoriasMapa).forEach(([cat, val]) => {
-      if (val > maxGasto) {
-        maxGasto = val;
-        maxCat = cat;
-      }
-    });
-
-    const totalDias = diasUnicos.size || 1;
-
-    return {
-      gastoTotal: totalGasto,
-      numTickets: purchases.length,
-      promedioDiario: totalGasto / totalDias,
-      categoriaMasGastada: maxCat
-    };
-  }, [purchases]);
-
-  // 2. PREPARACIÓN DE DATOS PARA LOS GRÁFICOS (RECHARTS)
-  const chartCategoriasData = useMemo(() => {
-    const mapa: { [key: string]: number } = {};
-    purchases.forEach(p => {
-      if ((p as any).products) {
-        (p as any).products.forEach((prod: any) => {
-          mapa[prod.categoria] = (mapa[prod.categoria] || 0) + Number(prod.precio_total);
-        });
-      }
-    });
-    return Object.entries(mapa).map(([name, value]) => ({ name, value }));
-  }, [purchases]);
-
-  const chartEvolucionData = useMemo(() => {
-    const mapa: { [key: string]: number } = {};
-    purchases.forEach(p => {
-      mapa[p.fecha] = (mapa[p.fecha] || 0) + Number(p.total);
-    });
-    return Object.entries(mapa)
-      .map(([fecha, total]) => ({ fecha, total }))
-      .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
-  }, [purchases]);
-
-  // 3. PAGINACIÓN DE LA TABLA (10 registros por página)
-  const itemsPorPagina = 10;
-  const totalPaginas = Math.ceil(purchases.length / itemsPorPagina) || 1;
-  const datosPaginados = useMemo(() => {
-    const inicio = (paginaActual - 1) * itemsPorPagina;
-    return purchases.slice(inicio, inicio + itemsPorPagina);
-  }, [purchases, paginaActual]);
-
-  const handleEliminar = async (id: number) => {
-    if (!confirm('¿Estás seguro de que deseas eliminar este ticket de forma permanente?')) return;
-    // Lógica de eliminación directa respetando RLS
-    const { error } = await (await import('@/lib/supabase-client')).supabaseClient
-      .from('purchases')
-      .delete()
-      .eq('id', id);
-    if (!error) refetch();
+    setLoading(true);
+    // Aquí irá tu fetch('/api/compras', { method: 'POST', body: formData })
+    setTimeout(() => {
+      alert('¡Ticket subido con éxito! (Simulado)');
+      setLoading(false);
+      setFile(null);
+    }, 2000);
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Encabezado */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
+      
+      {/* MENÚ LATERAL DE NAVEGACIÓN (Evita escribir rutas a mano) */}
+      <aside className="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 p-6 flex flex-col justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-dark-text">Control de Gastos</h1>
-          <p className="text-gray-500 text-sm">Gestiona e inspecciona tus comprobantes analizados con IA</p>
-        </div>
-      </div>
-    <div className="flex justify-between items-center mb-6">
-     <h1 className="text-2xl font-bold">Mi Dashboard</h1>
-
-  {/* Renderizamos el componente aquí pasando los datos */}
-  <ExportButtons purchases={purchases} />
-</div>
-      {/* FILA DE FILTROS */}
-      <div className="bg-white dark:bg-dark-card p-4 rounded-xl shadow-sm border border-emerald-50 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-4 gap-4 items-center">
-        <div>
-          <label className="block text-xs font-medium text-gray-400 mb-1">Fecha Inicio</label>
-          <input 
-            type="date" 
-            className="w-full text-sm bg-gray-50 dark:bg-dark-bg p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-dark-text focus:outline-none focus:border-emerald-500"
-            value={filters.startDate}
-            onChange={(e) => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-400 mb-1">Fecha Fin</label>
-          <input 
-            type="date" 
-            className="w-full text-sm bg-gray-50 dark:bg-dark-bg p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-dark-text focus:outline-none focus:border-emerald-500"
-            value={filters.endDate}
-            onChange={(e) => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-400 mb-1">Categoría</label>
-          <select 
-            className="w-full text-sm bg-gray-50 dark:bg-dark-bg p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-dark-text focus:outline-none focus:border-emerald-500"
-            value={filters.categoria}
-            onChange={(e) => setFilters(prev => ({ ...prev, categoria: e.target.value }))}
-          >
-            <option value="todas">Todas las categorías</option>
-            {["Alimentación", "Transporte", "Salud", "Hogar", "Entretenimiento", "Ropa", "Tecnología", "Educación", "Viajes", "Otros"].map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-400 mb-1">Establecimiento</label>
-          <div className="relative">
-            <input 
-              type="text" 
-              placeholder="Buscar comercio..."
-              className="w-full text-sm bg-gray-50 dark:bg-dark-bg pl-8 pr-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-dark-text focus:outline-none focus:border-emerald-500"
-              value={filters.busqueda}
-              onChange={(e) => setFilters(prev => ({ ...prev, busqueda: e.target.value }))}
-            />
-            <Search className="absolute left-2.5 top-3 w-4 h-4 text-gray-400" />
+          <div className="mb-8">
+            <h1 className="text-xl font-bold tracking-wider text-blue-400">TICKET <span className="text-white">AI</span></h1>
+            <p className="text-xs text-slate-500">Panel de Control</p>
           </div>
-        </div>
-      </div>
-
-      {/* TARJETAS DE RESUMEN */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        {[
-          { title: 'Gasto Total', val: formatCurrency(stats.gastoTotal), icon: DollarSign, color: 'text-emerald-700 bg-emerald-50' },
-          { title: 'Tickets Procesados', val: stats.numTickets, icon: Receipt, color: 'text-teal-600 bg-teal-50' },
-          { title: 'Promedio Diario', val: formatCurrency(stats.promedioDiario), icon: Calendar, color: 'text-cyan-600 bg-cyan-50' },
-          { title: 'Categoría Mayor', val: stats.categoriaMasGastada, icon: Tag, color: 'text-amber-600 bg-amber-50' }
-        ].map((card, idx) => (
-          <div key={idx} className="bg-white dark:bg-dark-card p-5 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">{card.title}</p>
-              <p className="text-2xl font-bold text-gray-800 dark:text-dark-text mt-1">{card.val}</p>
-            </div>
-            <div className={`p-3 rounded-lg ${card.color}`}>
-              <card.icon className="w-6 h-6" />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* FILA DE GRÁFICOS (RECHARTS) */}
-      <div id="charts-container" className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white dark:bg-dark-card p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-4">Gasto por Categorías</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartCategoriasData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="#9CA3AF" />
-                <YAxis tick={{ fontSize: 11 }} stroke="#9CA3AF" />
-                <Tooltip contentStyle={{ borderRadius: 8 }} />
-                <Bar dataKey="value" fill="#0F766E" radius={[4, 4, 0, 0]} name="Total Gastado" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          
+          <nav className="space-y-2">
+            <a href="/dashboard" className="flex items-center space-x-3 bg-blue-600 text-white px-4 py-2.5 rounded-xl font-medium transition text-sm">
+              <span>📊</span> <span>Inicio / Dashboard</span>
+            </a>
+            <a href="/dashboard/historial" className="flex items-center space-x-3 text-slate-400 hover:bg-slate-800 hover:text-white px-4 py-2.5 rounded-xl font-medium transition text-sm">
+              <span>🧾</span> <span>Mis Compras</span>
+            </a>
+            <a href="/dashboard/metricas" className="flex items-center space-x-3 text-slate-400 hover:bg-slate-800 hover:text-white px-4 py-2.5 rounded-xl font-medium transition text-sm">
+              <span>📈</span> <span>Estadísticas</span>
+            </a>
+          </nav>
         </div>
 
-        <div className="bg-white dark:bg-dark-card p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-4">Evolución del Gasto</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartEvolucionData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="fecha" tick={{ fontSize: 11 }} stroke="#9CA3AF" />
-                <YAxis tick={{ fontSize: 11 }} stroke="#9CA3AF" />
-                <Tooltip contentStyle={{ borderRadius: 8 }} />
-                <Line type="monotone" dataKey="total" stroke="#14B8A6" strokeWidth={3} dot={{ r: 4 }} name="Gasto Diario" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
+        {/* Botón de Cerrar Sesión en la parte inferior */}
+        <button 
+          onClick={handleLogout}
+          className="mt-8 flex items-center space-x-3 text-red-400 hover:bg-red-500/10 w-full px-4 py-2.5 rounded-xl font-medium transition text-sm text-left border border-transparent hover:border-red-500/20"
+        >
+          <span>🚪</span> <span>Cerrar Sesión</span>
+        </button>
+      </aside>
 
-      {/* TABLA DE COMPRAS */}
-      <div className="bg-white dark:bg-dark-card rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-gray-100 dark:border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text">Historial de Transacciones</h3>
-        </div>
-        {loading ? (
-          <div className="p-12 text-center text-gray-400 text-sm">Cargando transacciones...</div>
-        ) : datosPaginados.length === 0 ? (
-          <div className="p-12 text-center text-gray-400 text-sm">No se encontraron tickets en este rango.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-600 dark:text-gray-300">
-              <thead className="bg-gray-50 dark:bg-dark-bg text-gray-400 text-xs font-medium uppercase">
-                <tr>
-                  <th className="p-4">Fecha</th>
-                  <th className="p-4">Establecimiento</th>
-                  <th className="p-4">Total</th>
-                  <th className="p-4">Moneda</th>
-                  <th className="p-4">Productos</th>
-                  <th className="p-4 text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {datosPaginados.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
-                    <td className="p-4 whitespace-nowrap font-medium">{formatDate(item.fecha)}</td>
-                    <td className="p-4 font-semibold text-gray-800 dark:text-dark-text">{item.establecimiento}</td>
-                    <td className="p-4 text-emerald-700 dark:text-emerald-500 font-bold">{formatCurrency(item.total, item.moneda)}</td>
-                    <td className="p-4 uppercase text-xs">{item.moneda}</td>
-                    <td className="p-4"><span className="bg-gray-100 dark:bg-gray-800 px-2.5 py-1 rounded-full text-xs font-semibold">{(item as any).products?.length || 0} items</span></td>
-                    <td className="p-4 flex justify-center gap-2">
-                      <button onClick={() => setSelectedPurchase(item)} className="p-1.5 text-gray-400 hover:text-emerald-600 transition"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => handleEliminar(item.id)} className="p-1.5 text-gray-400 hover:text-rose-600 transition"><Trash2 className="w-4 h-4" /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        
-        {/* Paginación */}
-        <div className="p-4 bg-gray-50 dark:bg-dark-bg border-t border-gray-100 dark:border-gray-800 flex justify-between items-center text-xs">
-          <span className="text-gray-400">Página {paginaActual} de {totalPaginas}</span>
-          <div className="flex gap-2">
-            <button disabled={paginaActual === 1} onClick={() => setPaginaActual(p => p - 1)} className="px-3 py-1.5 rounded bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 disabled:opacity-50">Anterior</button>
-            <button disabled={paginaActual === totalPaginas} onClick={() => setPaginaActual(p => p + 1)} className="px-3 py-1.5 rounded bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 disabled:opacity-50">Siguiente</button>
-          </div>
-        </div>
-      </div>
+      {/* CONTENIDO PRINCIPAL DEL DASHBOARD */}
+      <main className="flex-1 p-6 md:p-10 max-w-4xl mx-auto w-full">
+        <header className="mb-8">
+          <h2 className="text-3xl font-bold tracking-tight">Bienvenido a tu Dashboard</h2>
+          <p className="text-slate-400 text-sm mt-1">Sube un nuevo ticket para comenzar el análisis inteligente.</p>
+        </header>
 
-      {/* MODAL MODULAR DE DETALLE DE COMPRA */}
-      {selectedPurchase && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-dark-card rounded-xl max-w-2xl w-full p-6 shadow-xl border border-gray-100 dark:border-gray-800 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-start border-b pb-3 dark:border-gray-800">
-              <div>
-                <h4 className="text-lg font-bold text-gray-800 dark:text-dark-text">{selectedPurchase.establecimiento}</h4>
-                <p className="text-xs text-gray-400">{formatDate(selectedPurchase.fecha)}</p>
-              </div>
-              <button onClick={() => setSelectedPurchase(null)} className="text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
-            </div>
-            
-            <div className="space-y-2">
-              <h5 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Artículos Desglosados</h5>
-              <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                {selectedPurchase.products?.map((prod: any) => (
-                  <div key={prod.id} className="py-2.5 flex justify-between items-center text-sm">
-                    <div>
-                      <p className="font-semibold text-gray-800 dark:text-dark-text">{prod.nombre}</p>
-                      <span className="inline-block text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-medium px-2 py-0.5 rounded-full mt-0.5">{prod.categoria}</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-gray-800 dark:text-dark-text">{formatCurrency(prod.precio_total, selectedPurchase.moneda)}</p>
-                      <p className="text-xs text-gray-400">{prod.cantidad} x {formatCurrency(prod.precio_unitary || prod.precio_unitario, selectedPurchase.moneda)}</p>
-                    </div>
-                  </div>
-                ))}
+        {/* COMPONENTE: ZONA DE SUBIDA DE TICKET */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <span>📂</span> Analizar Nuevo Comprobante
+          </h3>
+          
+          <form onSubmit={handleUpload} className="space-y-4">
+            <div className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-8 text-center cursor-pointer transition relative bg-slate-950/50">
+              <input 
+                type="file" 
+                accept="image/*,application/pdf"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+              <div className="space-y-2">
+                <span className="text-4xl block">📸</span>
+                <p className="text-sm font-medium text-slate-300">
+                  {file ? `Archivo seleccionado: ${file.name}` : 'Arrastra tu ticket aquí o haz clic para explorar'}
+                </p>
+                <p className="text-xs text-slate-500">Soporta imágenes (PNG, JPG) y PDF de hasta 5MB</p>
               </div>
             </div>
 
-            <div className="pt-3 border-t dark:border-gray-800 flex justify-between items-center font-bold">
-              <span className="text-gray-800 dark:text-dark-text">Total Registrado:</span>
-              <span className="text-xl text-emerald-700 dark:text-emerald-500">{formatCurrency(selectedPurchase.total, selectedPurchase.moneda)}</span>
-            </div>
+            {file && (
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-xl transition text-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loading ? 'Procesando con IA...' : '🚀 Iniciar Análisis'}
+                </button>
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* SECCIÓN MOCK: RESUMEN DE COMPRAS RECIENTES */}
+        <div className="mt-8 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold mb-4">Actividad Reciente</h3>
+          <div className="text-center py-8 text-slate-500 text-sm border border-slate-800 border-dashed rounded-xl">
+            Tus tickets procesados aparecerán listados en esta zona.
           </div>
         </div>
-      )}
+      </main>
+
     </div>
   );
 }
