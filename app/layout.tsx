@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
-// @ts-expect-error - Ignorar validación estricta de CSS en compilación
 import '@/app/globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
