@@ -2,28 +2,33 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js'; // <-- Cambiado a la librería base
+import { createClient } from '@supabase/supabase-js';
+
+// Inicialización limpia de Supabase usando variables de entorno públicas
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function Dashboard() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Función para cerrar sesión
+  // Función para cerrar sesión usando el cliente unificado
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.refresh();
     router.push('/login');
   };
 
-  // Función simulada para subir el ticket (conectarás con tu API de compras/Gemini)
+  // Función simulada para subir el ticket
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return alert('Por favor, selecciona un archivo primero');
 
     setLoading(true);
-    // Aquí irá tu fetch('/api/compras', { method: 'POST', body: formData })
+    // Tu llamada futura a fetch('/api/compras') irá aquí
     setTimeout(() => {
       alert('¡Ticket subido con éxito! (Simulado)');
       setLoading(false);
@@ -34,7 +39,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
       
-      {/* MENÚ LATERAL DE NAVEGACIÓN (Evita escribir rutas a mano) */}
+      {/* MENÚ LATERAL DE NAVEGACIÓN */}
       <aside className="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 p-6 flex flex-col justify-between">
         <div>
           <div className="mb-8">
@@ -55,7 +60,7 @@ export default function Dashboard() {
           </nav>
         </div>
 
-        {/* Botón de Cerrar Sesión en la parte inferior */}
+        {/* Botón de Cerrar Sesión */}
         <button 
           onClick={handleLogout}
           className="mt-8 flex items-center space-x-3 text-red-400 hover:bg-red-500/10 w-full px-4 py-2.5 rounded-xl font-medium transition text-sm text-left border border-transparent hover:border-red-500/20"
@@ -64,14 +69,14 @@ export default function Dashboard() {
         </button>
       </aside>
 
-      {/* CONTENIDO PRINCIPAL DEL DASHBOARD */}
+      {/* CONTENIDO PRINCIPAL */}
       <main className="flex-1 p-6 md:p-10 max-w-4xl mx-auto w-full">
         <header className="mb-8">
           <h2 className="text-3xl font-bold tracking-tight">Bienvenido a tu Dashboard</h2>
           <p className="text-slate-400 text-sm mt-1">Sube un nuevo ticket para comenzar el análisis inteligente.</p>
         </header>
 
-        {/* COMPONENTE: ZONA DE SUBIDA DE TICKET */}
+        {/* COMPONENTE: ZONA DE SUBIDA */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <span>📂</span> Analizar Nuevo Comprobante
@@ -108,7 +113,7 @@ export default function Dashboard() {
           </form>
         </div>
 
-        {/* SECCIÓN MOCK: RESUMEN DE COMPRAS RECIENTES */}
+        {/* HISTORIAL RECIENTE */}
         <div className="mt-8 bg-slate-900 border border-slate-800 rounded-2xl p-6">
           <h3 className="text-lg font-semibold mb-4">Actividad Reciente</h3>
           <div className="text-center py-8 text-slate-500 text-sm border border-slate-800 border-dashed rounded-xl">
