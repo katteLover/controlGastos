@@ -2,9 +2,10 @@
 module.exports = {
   darkMode: 'class',
   content: [
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
+  "./app/**/*.{js,ts,jsx,tsx,mdx}",        // <-- Crucial para la carpeta app/
+  "./components/**/*.{js,ts,jsx,tsx,mdx}", // <-- Para tus componentes reutilizables
+  "./lib/**/*.{js,ts,jsx,tsx,mdx}",        // <-- En caso de que uses clases en utils.ts
+],
   theme: {
     extend: {
       colors: {

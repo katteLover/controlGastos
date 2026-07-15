@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
 import { Toaster } from 'sonner';
-import './globals.css'; // Asegúrate de importar tus estilos globales de Tailwind
+import '@/app/globals.css'; // Asegúrate de importar tus estilos globales de Tailwind
 
 const inter = Inter({ subsets: ['latin'] });
 
