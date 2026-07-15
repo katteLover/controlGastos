@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // Asegúrate de tener esta dependencia instalada
+import { createClient } from '@supabase/supabase-js'; // <-- Cambiado a la librería base
 
 export default function Dashboard() {
   const router = useRouter();
