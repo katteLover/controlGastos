@@ -1,93 +1,90 @@
 import { NextResponse } from 'next/server';
-import { analyzeTicket } from '@/lib/gemini';
-import { supabaseServer } from '@/lib/supabase-server';
-import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI } from '@google/generative-ai';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 
-// Configuración nativa de Next.js para Vercel Serverless
-export const maxDuration = 60; 
-export const dynamic = 'force-dynamic';
+// Inicializamos Gemini con tu API Key de las variables de entorno
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    // 1. Verificación de Autenticación Segura en el Servidor
-    const token = req.headers.get('Authorization')?.replace('Bearer ', '') || 
-                  (req as any).cookies?.get('sb-access-token')?.value;
+    // 1. Verificar que el usuario esté autenticado en Supabase
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: { session } } = await supabase.auth.getSession();
 
-    if (!token) {
-      return NextResponse.json({ error: 'No autorizado. Token de sesión ausente.' }, { status: 401 });
+    if (!session) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    // Usamos el cliente anónimo público solo para validar la autenticidad del token del usuario
-    const authCheckClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    // 2. Extraer el archivo del FormData enviado por el frontend
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
+
+    if (!file) {
+      return NextResponse.json({ error: 'No se proporcionó ningún archivo' }, { status: 400 });
+    }
+
+    // 3. Convertir el archivo a un formato que Gemini pueda entender (Base64)
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const filePart = {
+      inlineData: {
+        data: buffer.toString('base64'),
+        mimeType: file.type,
+      },
+    };
+
+    // 4. Llamar a Gemini (usamos gemini-1.5-flash por su velocidad y bajo costo)
+    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
-    const { data: { user }, error: authError } = await authCheckClient.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Sesión inválida o expirada.' }, { status: 401 });
-    }
+    const prompt = `Analiza detalladamente este ticket o factura de compra. 
+    Extrae la información y devuélvela estrictamente en el siguiente formato JSON. 
+    No agregues introducciones, explicaciones, ni bloques de código markdown (\`\`\`json). Devuelve únicamente el JSON crudo:
 
-    // 2. Extracción de los parámetros del cuerpo de la petición
-    const body = await req.json();
-    const { base64, mimeType, imageUrl } = body;
+    {
+      "establecimiento": "Nombre comercial del comercio o tienda",
+      "fecha": "Fecha de la compra en formato YYYY-MM-DD (si no la encuentras, usa la fecha de hoy)",
+      "total": 0.00,
+      "categoria": "Elige una sola categoría lógica de esta lista: Supermercado, Restaurante, Tecnología, Ropa, Transporte, Entretenimiento, Hogar, Otros",
+      "items": [
+        {
+          "producto": "Nombre corto del producto",
+          "precio": 0.00
+        }
+      ]
+    }`;
 
-    if (!base64 || !mimeType) {
-      return NextResponse.json({ error: 'Parámetros obligatorios faltantes (base64, mimeType).' }, { status: 400 });
-    }
+    const result = await model.generateContent([prompt, filePart]);
+    const textResponse = result.response.text().trim();
 
-    // 3. Procesamiento Multimodal con Gemini API
-    const extractedData = await analyzeTicket(base64, mimeType);
+    // Limpiamos posibles formatos de markdown que a veces la IA agrega por inercia
+    const cleanJsonString = textResponse.replace(/```json|```/g, '').trim();
+    const extractedData = JSON.parse(cleanJsonString);
 
-    // 4. Inserción de la Compra Principal en la DB
-    // Usamos supabaseServer para asegurar la escritura correcta omitiendo restricciones estrictas
-    const { data: purchase, error: purchaseError } = await supabaseServer
-      .from('purchases')
+    // 5. Guardar la información procesada directamente en la base de datos de Supabase
+    const { data, error } = await supabase
+      .from('compras')
       .insert({
-        user_id: user.id,
-        establecimiento: extractedData.establecimiento || 'Establecimiento no identificado',
-        fecha: extractedData.fecha || new Date().toISOString().split('T')[0],
-        total: extractedData.total || 0,
-        moneda: extractedData.moneda || 'EUR',
-        imagen_url: imageUrl || null
+        user_id: session.user.id,
+        establecimiento: extractedData.establecimiento,
+        fecha: extractedData.fecha,
+        total: extractedData.total,
+        categoria: extractedData.categoria,
+        items: extractedData.items,
       })
       .select()
       .single();
 
-    if (purchaseError) {
-      return NextResponse.json({ error: `Error persistiendo el ticket: ${purchaseError.message}` }, { status: 500 });
+    if (error) {
+      console.error('Error al guardar en base de datos:', error);
+      return NextResponse.json({ error: 'Error al registrar la compra' }, { status: 500 });
     }
 
-    // 5. Inserción de los productos desglosados (Si existen)
-    if (extractedData.productos && extractedData.productos.length > 0) {
-      const formattedProducts = extractedData.productos.map((prod: any) => ({
-        purchase_id: purchase.id,
-        nombre: prod.nombre || 'Producto Genérico',
-        categoria: prod.categoria || 'Otros',
-        precio_unitario: prod.precio_unitario || prod.precio_total || 0,
-        cantidad: prod.cantidad || 1,
-        precio_total: prod.precio_total || 0
-      }));
-
-      const { error: productsError } = await supabaseServer
-        .from('products')
-        .insert(formattedProducts);
-
-      if (productsError) {
-        // Nota: En producción podrías querer implementar un rollback manual si falla,
-        // pero dado el flujo, retornamos un mensaje descriptivo para alertar al cliente.
-        return NextResponse.json({ 
-          success: true, 
-          data: purchase, 
-          warning: `Compra guardada pero los productos fallaron al insertarse: ${productsError.message}` 
-        });
-      }
-    }
-
-    return NextResponse.json({ success: true, data: purchase });
+    // Retornamos el registro guardado con éxito
+    return NextResponse.json({ success: true, compra: data });
 
   } catch (error: any) {
-    console.error('Error crítico en /api/procesar:', error);
-    return NextResponse.json({ error: error.message || 'Error interno al procesar el ticket.' }, { status: 500 });
+    console.error('Error en el procesamiento del ticket:', error);
+    return NextResponse.json({ error: 'Error interno del servidor', details: error.message }, { status: 500 });
   }
 }

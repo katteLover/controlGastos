@@ -22,18 +22,37 @@ export default function Dashboard() {
     router.push('/login');
   };
 
-  // Función simulada para subir el ticket
+// Función real para subir y procesar el ticket con la IA
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return alert('Por favor, selecciona un archivo primero');
 
     setLoading(true);
-    // Tu llamada futura a fetch('/api/compras') irá aquí
-    setTimeout(() => {
-      alert('¡Ticket subido con éxito! (Simulado)');
-      setLoading(false);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/procesar', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Ocurrió un error al procesar el ticket');
+      }
+
+      alert(`¡Ticket analizado con éxito!\n\nTienda: ${data.compra.establecimiento}\nTotal: $${data.compra.total}\nCategoría: ${data.compra.categoria}`);
+      
       setFile(null);
-    }, 2000);
+      router.refresh(); // Esto recargará los datos del servidor para actualizar la lista de abajo
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
