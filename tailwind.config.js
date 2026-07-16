@@ -1,11 +1,17 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: 'class',
   content: [
-  "./app/**/*.{js,ts,jsx,tsx,mdx}",        // <-- Crucial para la carpeta app/
-  "./components/**/*.{js,ts,jsx,tsx,mdx}", // <-- Para tus componentes reutilizables
-  "./lib/**/*.{js,ts,jsx,tsx,mdx}",        // <-- En caso de que uses clases en utils.ts
-],
+    // Rutas si NO usas carpeta src/
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    
+    // Rutas si SÍ usas carpeta src/
+    "./src/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
   theme: {
     extend: {
       colors: {
