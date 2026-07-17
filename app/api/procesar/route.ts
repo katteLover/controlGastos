@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/generative-ai'; // <-- Corregido el nombre de la clase
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 
-// Inicializamos Gemini con tu API Key de las variables de entorno
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+// Inicializamos Gemini correctamente pasándole directamente el string de la API Key
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(request: Request) {
   try {
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     };
 
     // 4. Llamar a Gemini (usamos gemini-1.5-flash por su velocidad y bajo costo)
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
     const prompt = `Analiza detalladamente este ticket o factura de compra. 
     Extrae la información y devuélvela estrictamente en el siguiente formato JSON. 
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
         user_id: session.user.id,
         establecimiento: extractedData.establecimiento,
         fecha: extractedData.fecha,
-        total: extractedData.total,
+        total: parseFloat(extractedData.total), // Aseguramos que sea un número flotante
         categoria: extractedData.categoria,
         items: extractedData.items,
       })
