@@ -22,20 +22,29 @@ export default function Dashboard() {
     router.push('/login');
   };
 
-// Función real para subir y procesar el ticket con la IA
-  const handleUpload = async (e: React.FormEvent) => {
+const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) return alert('Por favor, selecciona un archivo primero');
 
     setLoading(true);
 
     try {
+      // 1. Obtener la sesión activa del cliente local para extraer el JWT
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No se encontró una sesión activa. Por favor, vuelve a iniciar sesión.');
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 
+      // 2. Enviar el archivo incluyendo el token en los headers de autorización
       const response = await fetch('/api/procesar', {
         method: 'POST',
         body: formData,
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`, // <-- Inyección del token seguro
+        },
       });
 
       const data = await response.json();
@@ -47,7 +56,7 @@ export default function Dashboard() {
       alert(`¡Ticket analizado con éxito!\n\nTienda: ${data.compra.establecimiento}\nTotal: $${data.compra.total}\nCategoría: ${data.compra.categoria}`);
       
       setFile(null);
-      router.refresh(); // Esto recargará los datos del servidor para actualizar la lista de abajo
+      router.refresh(); 
     } catch (error: any) {
       alert(`Error: ${error.message}`);
     } finally {

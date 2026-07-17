@@ -1,22 +1,38 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai'; // <-- Corregido el nombre de la clase
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createClient } from '@supabase/supabase-js';
 
-// Inicializamos Gemini correctamente pasándole directamente el string de la API Key
+// Inicializamos Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(request: Request) {
   try {
-    // 1. Verificar que el usuario esté autenticado en Supabase
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: { session } } = await supabase.auth.getSession();
+    // 1. Extraer el token de autenticación desde las cabeceras (headers)
+    const authHeader = request.headers.get('Authorization');
+    const token = authHeader?.split(' ')[1];
 
-    if (!session) {
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    if (!token) {
+      return NextResponse.json({ error: 'No autorizado - Falta el token de sesión' }, { status: 401 });
     }
 
-    // 2. Extraer el archivo del FormData enviado por el frontend
+    // 2. Inicializar Supabase inyectando el token del usuario para respetar el RLS
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      }
+    );
+
+    // Validar el token obteniendo los datos del usuario real
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Sesión inválida o expirada' }, { status: 401 });
+    }
+
+    // 3. Extraer el archivo del FormData
     const formData = await request.formData();
     const file = formData.get('file') as File;
 
@@ -24,7 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No se proporcionó ningún archivo' }, { status: 400 });
     }
 
-    // 3. Convertir el archivo a un formato que Gemini pueda entender (Base64)
+    // 4. Convertir el archivo a Base64 para Gemini
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const filePart = {
@@ -34,7 +50,7 @@ export async function POST(request: Request) {
       },
     };
 
-    // 4. Llamar a Gemini (usamos gemini-1.5-flash por su velocidad y bajo costo)
+    // 5. Llamar a Gemini 1.5 Flash
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
     const prompt = `Analiza detalladamente este ticket o factura de compra. 
@@ -57,18 +73,17 @@ export async function POST(request: Request) {
     const result = await model.generateContent([prompt, filePart]);
     const textResponse = result.response.text().trim();
 
-    // Limpiamos posibles formatos de markdown que a veces la IA agrega por inercia
     const cleanJsonString = textResponse.replace(/```json|```/g, '').trim();
     const extractedData = JSON.parse(cleanJsonString);
 
-    // 5. Guardar la información procesada directamente en la base de datos de Supabase
+    // 6. Guardar la compra en Supabase (usando el user.id validado)
     const { data, error } = await supabase
       .from('compras')
       .insert({
-        user_id: session.user.id,
+        user_id: user.id,
         establecimiento: extractedData.establecimiento,
         fecha: extractedData.fecha,
-        total: parseFloat(extractedData.total), // Aseguramos que sea un número flotante
+        total: parseFloat(extractedData.total),
         categoria: extractedData.categoria,
         items: extractedData.items,
       })
@@ -77,10 +92,9 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('Error al guardar en base de datos:', error);
-      return NextResponse.json({ error: 'Error al registrar la compra' }, { status: 500 });
+      return NextResponse.json({ error: 'Error al registrar la compra en la base de datos' }, { status: 500 });
     }
 
-    // Retornamos el registro guardado con éxito
     return NextResponse.json({ success: true, compra: data });
 
   } catch (error: any) {
