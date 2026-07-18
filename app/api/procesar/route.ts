@@ -55,7 +55,7 @@ export async function POST(request: Request) {
 
     // 2. Ejecutar la llamada a la Inteligencia Artificial de Google
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
     
     const prompt = `Analiza detalladamente este ticket o factura de compra. 
     Extrae la información y devuélvela estrictamente en el siguiente formato JSON. 
