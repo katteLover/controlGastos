@@ -1,49 +1,91 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
-// Inicialización limpia de Supabase usando variables de entorno públicas
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// Inicialización del cliente estándar de Supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export default function Dashboard() {
+interface Compra {
+  id: string;
+  fecha: string;
+  establecimiento: string;
+  categoria: string;
+  total: number;
+  items: any[];
+}
+
+export default function DashboardPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [compras, setCompras] = useState<Compra[]>([]);
+  const [loadingGastos, setLoadingGastos] = useState(true);
+  const [userName, setUserName] = useState<string>('');
 
-  // Función para cerrar sesión usando el cliente unificado
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.refresh();
-    router.push('/login');
+  // 1. Verificar sesión del usuario e inicializar datos
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        // Si no hay sesión, redirigir inmediatamente a la página de login / inicio
+        router.push('/');
+      } else {
+        setUserName(session.user.email || 'Usuario');
+        fetchCompras();
+      }
+    };
+
+    checkUser();
+  }, [router]);
+
+  // 2. Obtener las compras reales de Supabase
+  const fetchCompras = async () => {
+    try {
+      setLoadingGastos(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('compras')
+        .select('*')
+        .order('fecha', { ascending: false });
+
+      if (error) throw error;
+      setCompras(data || []);
+    } catch (error: any) {
+      console.error('Error cargando compras:', error.message);
+    } finally {
+      setLoadingGastos(false);
+    }
   };
 
-const handleUpload = async (e: React.FormEvent) => {
+  // 3. Subir el archivo y enviarlo al backend procesador con Gemini
+  const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) return alert('Por favor, selecciona un archivo primero');
+    if (!file) return alert('Por favor, selecciona una foto o PDF de tu ticket primero.');
 
     setLoading(true);
 
     try {
-      // 1. Obtener la sesión activa del cliente local para extraer el JWT
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        throw new Error('No se encontró una sesión activa. Por favor, vuelve a iniciar sesión.');
+        throw new Error('No se encontró una sesión activa. Vuelve a iniciar sesión.');
       }
 
       const formData = new FormData();
       formData.append('file', file);
 
-      // 2. Enviar el archivo incluyendo el token en los headers de autorización
+      // Enviamos la petición inyectando el JWT de Supabase en la cabecera Authorization
       const response = await fetch('/api/procesar', {
         method: 'POST',
         body: formData,
         headers: {
-          'Authorization': `Bearer ${session.access_token}`, // <-- Inyección del token seguro
+          'Authorization': `Bearer ${session.access_token}`,
         },
       });
 
@@ -56,7 +98,12 @@ const handleUpload = async (e: React.FormEvent) => {
       alert(`¡Ticket analizado con éxito!\n\nTienda: ${data.compra.establecimiento}\nTotal: $${data.compra.total}\nCategoría: ${data.compra.categoria}`);
       
       setFile(null);
-      router.refresh(); 
+      // Reseteamos el input file nativo de la interfaz
+      const fileInput = document.getElementById('ticket-input') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+
+      // Recargamos el listado de compras en tiempo real sin recargar la página entera
+      fetchCompras(); 
     } catch (error: any) {
       alert(`Error: ${error.message}`);
     } finally {
@@ -64,92 +111,163 @@ const handleUpload = async (e: React.FormEvent) => {
     }
   };
 
+  // 4. Cerrar sesión
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push('/');
+  };
+
+  // 5. Cálculos dinámicos basados en datos reales
+  const totalGastado = compras.reduce((acc, item) => acc + Number(item.total), 0);
+  const totalTickets = compras.length;
+  const promedioGasto = totalTickets > 0 ? totalGastado / totalTickets : 0;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
-      
-      {/* MENÚ LATERAL DE NAVEGACIÓN */}
-      <aside className="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 p-6 flex flex-col justify-between">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+      {/* Barra de navegación superior */}
+      <nav className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
         <div>
-          <div className="mb-8">
-            <h1 className="text-xl font-bold tracking-wider text-blue-400">TICKET <span className="text-white">AI</span></h1>
-            <p className="text-xs text-slate-500">Panel de Control</p>
+          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+            ControlGastos AI
+          </h1>
+          <p className="text-xs text-slate-500">Sesión: {userName}</p>
+        </div>
+        <button
+          onClick={handleSignOut}
+          className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-100 transition duration-200"
+        >
+          Cerrar Sesión
+        </button>
+      </nav>
+
+      <main className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* COLUMNA IZQUIERDA: Formulario de Carga */}
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <h2 className="text-lg font-bold text-slate-700 mb-2">Escanear Nuevo Ticket</h2>
+            <p className="text-xs text-slate-500 mb-4">
+              Sube una foto o un PDF. Nuestro motor inteligente con Gemini extraerá automáticamente los productos, el comercio, el total y la categoría.
+            </p>
+
+            <form onSubmit={handleUpload} className="space-y-4">
+              <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-blue-500 transition cursor-pointer relative bg-slate-50">
+                <input
+                  id="ticket-input"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                <div className="space-y-1">
+                  <svg className="mx-auto h-10 w-10 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <p className="text-sm font-medium text-slate-600">
+                    {file ? file.name : 'Seleccionar archivo o imagen'}
+                  </p>
+                  <p className="text-xs text-slate-400">PNG, JPG, JPEG o PDF hasta 10MB</p>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || !file}
+                className={`w-full py-3 px-4 rounded-xl text-white font-medium shadow-md transition duration-200 ${
+                  loading || !file
+                    ? 'bg-slate-300 cursor-not-allowed shadow-none'
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'
+                }`}
+              >
+                {loading ? 'Procesando con Gemini AI...' : 'Analizar Comprobante'}
+              </button>
+            </form>
           </div>
-          
-          <nav className="space-y-2">
-            <a href="/dashboard" className="flex items-center space-x-3 bg-blue-600 text-white px-4 py-2.5 rounded-xl font-medium transition text-sm">
-              <span>📊</span> <span>Inicio / Dashboard</span>
-            </a>
-            <a href="/dashboard/historial" className="flex items-center space-x-3 text-slate-400 hover:bg-slate-800 hover:text-white px-4 py-2.5 rounded-xl font-medium transition text-sm">
-              <span>🧾</span> <span>Mis Compras</span>
-            </a>
-            <a href="/dashboard/metricas" className="flex items-center space-x-3 text-slate-400 hover:bg-slate-800 hover:text-white px-4 py-2.5 rounded-xl font-medium transition text-sm">
-              <span>📈</span> <span>Estadísticas</span>
-            </a>
-          </nav>
         </div>
 
-        {/* Botón de Cerrar Sesión */}
-        <button 
-          onClick={handleLogout}
-          className="mt-8 flex items-center space-x-3 text-red-400 hover:bg-red-500/10 w-full px-4 py-2.5 rounded-xl font-medium transition text-sm text-left border border-transparent hover:border-red-500/20"
-        >
-          <span>🚪</span> <span>Cerrar Sesión</span>
-        </button>
-      </aside>
-
-      {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 p-6 md:p-10 max-w-4xl mx-auto w-full">
-        <header className="mb-8">
-          <h2 className="text-3xl font-bold tracking-tight">Bienvenido a tu Dashboard</h2>
-          <p className="text-slate-400 text-sm mt-1">Sube un nuevo ticket para comenzar el análisis inteligente.</p>
-        </header>
-
-        {/* COMPONENTE: ZONA DE SUBIDA */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <span>📂</span> Analizar Nuevo Comprobante
-          </h3>
+        {/* COLUMNA DERECHA: Métricas e Historial */}
+        <div className="lg:col-span-2 space-y-6">
           
-          <form onSubmit={handleUpload} className="space-y-4">
-            <div className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-8 text-center cursor-pointer transition relative bg-slate-950/50">
-              <input 
-                type="file" 
-                accept="image/*,application/pdf"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-              />
-              <div className="space-y-2">
-                <span className="text-4xl block">📸</span>
-                <p className="text-sm font-medium text-slate-300">
-                  {file ? `Archivo seleccionado: ${file.name}` : 'Arrastra tu ticket aquí o haz clic para explorar'}
-                </p>
-                <p className="text-xs text-slate-500">Soporta imágenes (PNG, JPG) y PDF de hasta 5MB</p>
-              </div>
+          {/* Fila de Tarjetas de Métricas Dinámicas */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Gastado</p>
+              <p className="text-3xl font-extrabold text-slate-800 mt-1">${totalGastado.toFixed(2)}</p>
+            </div>
+            
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tickets Guardados</p>
+              <p className="text-3xl font-extrabold text-slate-800 mt-1">{totalTickets}</p>
             </div>
 
-            {file && (
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-xl transition text-sm disabled:opacity-50 flex items-center gap-2"
-                >
-                  {loading ? 'Procesando con IA...' : '🚀 Iniciar Análisis'}
-                </button>
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Gasto Promedio</p>
+              <p className="text-3xl font-extrabold text-slate-800 mt-1">${promedioGasto.toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Bloque del Historial de Gastos Reales */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="font-bold text-slate-700 text-lg">Historial de Compras</h3>
+              <button 
+                onClick={fetchCompras} 
+                className="text-xs font-medium text-blue-600 hover:underline"
+              >
+                Actualizar lista
+              </button>
+            </div>
+            
+            {loadingGastos ? (
+              <div className="p-12 text-center text-slate-400">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-3"></div>
+                Cargando tu información financiera...
+              </div>
+            ) : compras.length === 0 ? (
+              <div className="p-12 text-center text-slate-400 space-y-2">
+                <p className="font-medium text-slate-500">No hay transacciones registradas</p>
+                <p className="text-xs max-w-sm mx-auto">Tus gastos aparecerán aquí estructurados automáticamente en cuanto subas tu primer ticket.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/70 text-slate-500 font-semibold text-xs border-b border-slate-100 uppercase tracking-wider">
+                      <th className="p-4">Fecha</th>
+                      <th className="p-4">Establecimiento</th>
+                      <th className="p-4">Categoría</th>
+                      <th className="p-4 text-right">Monto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700 text-sm">
+                    {compras.map((compra) => {
+                      // Formatear la fecha limpiamente quitando desfases horarios visuales comunes
+                      const dateObj = new Date(compra.fecha + 'T00:00:00');
+                      const formattedDate = isNaN(dateObj.getTime()) 
+                        ? compra.fecha 
+                        : dateObj.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+                      return (
+                        <tr key={compra.id} className="hover:bg-slate-50/50 transition">
+                          <td className="p-4 text-slate-500 whitespace-nowrap">{formattedDate}</td>
+                          <td className="p-4 font-semibold text-slate-900">{compra.establecimiento}</td>
+                          <td className="p-4">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                              {compra.categoria}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right font-bold text-slate-900">${Number(compra.total).toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
-          </form>
-        </div>
-
-        {/* HISTORIAL RECIENTE */}
-        <div className="mt-8 bg-slate-900 border border-slate-800 rounded-2xl p-6">
-          <h3 className="text-lg font-semibold mb-4">Actividad Reciente</h3>
-          <div className="text-center py-8 text-slate-500 text-sm border border-slate-800 border-dashed rounded-xl">
-            Tus tickets procesados aparecerán listados en esta zona.
           </div>
+
         </div>
       </main>
-
     </div>
   );
 }
