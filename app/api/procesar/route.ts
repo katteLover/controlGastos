@@ -1,127 +1,107 @@
-import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
 
-export async function POST(request: Request) {
+// 1. Inicializar el nuevo SDK unificado de Google
+const apiKey = process.env.GEMINI_API_KEY || '';
+const ai = new GoogleGenAI({ apiKey });
+
+interface ItemDesglosado {
+  nombre: string;
+  shadow?: boolean;
+  cantidad: number;
+  precio: number;
+}
+
+interface EstructuraTicket {
+  establecimiento: string;
+  fecha: string;
+  total: number;
+  categoria: string;
+  items: ItemDesglosado[];
+}
+
+export async function POST(request: NextRequest) {
   try {
-    // 1. Diagnóstico preventivo de variables de entorno
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: 'Falta la configuración de la variable GEMINI_API_KEY en el servidor.' }, { status: 500 });
-    }
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: 'Faltan las variables de entorno de acceso a Supabase en el backend.' }, { status: 500 });
-    }
-
-    const authHeader = request.headers.get('Authorization');
-    const token = authHeader?.split(' ')[1];
-
-    if (!token) {
-      return NextResponse.json({ error: 'No autorizado - Falta el token de sesión' }, { status: 401 });
-    }
-
-    // Inicializar el cliente usando variables del entorno del servidor de forma segura
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      }
-    );
-
-    // Validar el token contra el motor de autenticación de Supabase
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: `Sesión inválida o expirada en Supabase: ${authError?.message}` }, { status: 401 });
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'La credencial GEMINI_API_KEY no está configurada en el servidor.' },
+        { status: 500 }
+      );
     }
 
     const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const file = formData.get('file') as File | null;
 
     if (!file) {
-      return NextResponse.json({ error: 'No se cargó ningún archivo en la petición.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'No se recibió ningún archivo válido.' },
+        { status: 400 }
+      );
     }
 
-    // Convertir archivo a estructura binaria Base64
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const filePart = {
-      inlineData: {
-        data: buffer.toString('base64'),
-        mimeType: file.type,
-      },
-    };
+    // 2. Convertir el archivo a buffer binario
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
 
-    // 2. Ejecutar la llamada a la Inteligencia Artificial de Google
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
-    
-    const prompt = `Analiza detalladamente este ticket o factura de compra. 
-    Extrae la información y devuélvela estrictamente en el siguiente formato JSON. 
-    No agregues introducciones, explicaciones, ni bloques de código markdown (\`\`\`json). Devuelve únicamente el JSON crudo:
+    const prompt = `
+      Analiza detalladamente esta imagen o documento de ticket de compra.
+      Tu único objetivo es extraer la información y estructurarla exactamente en el siguiente esquema JSON, sin agregar texto extra, formato markdown ni introducciones:
 
-    {
-      "establecimiento": "Nombre comercial del comercio o tienda",
-      "fecha": "Fecha de la compra en formato YYYY-MM-DD (si no la encuentras, usa la fecha de hoy)",
-      "total": 0.00,
-      "categoria": "Elige una sola categoría lógica de esta lista: Supermercado, Restaurante, Tecnología, Ropa, Transporte, Entretenimiento, Hogar, Otros",
-      "items": [
+      {
+        "establecimiento": "Nombre comercial de la tienda o empresa",
+        "fecha": "Fecha de emisión en formato estricto YYYY-MM-DD (si no es legible, usa la fecha de hoy)",
+        "total": 0.00, 
+        "categoria": "Clasifícalo exclusivamente en una de estas: Supermercado, Restaurante, Tecnología, Ropa, Transporte, Entretenimiento, Hogar, Otros",
+        "items": [
+          {
+            "nombre": "Descripción simplificada del artículo o servicio",
+            "cantidad": 1,
+            "precio": 0.00
+          }
+        ]
+      }
+
+      Nota: Asegúrate de que los valores numéricos se guarden como floats/numbers y nunca como cadenas de texto.
+    `;
+
+    // 3. Ejecutar la llamada usando la nueva API estructurada: ai.models.generateContent
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-flash-lite', // Tu modelo verificado
+      contents: [
+        prompt,
         {
-          "producto": "Nombre corto del producto",
-          "precio": 0.00
-        }
-      ]
-    }`;
+          inlineData: {
+            data: buffer.toString('base64'),
+            mimeType: file.type,
+          },
+        },
+      ],
+      config: {
+        // En el nuevo SDK, la configuración va dentro de este objeto nativo y tipado
+        responseMimeType: 'application/json',
+      },
+    });
 
-    let textResponse = '';
-    try {
-      const result = await model.generateContent([prompt, filePart]);
-      textResponse = result.response.text().trim();
-    } catch (geminiError: any) {
-      console.error('Fallo crítico en la API de Gemini:', geminiError);
-      return NextResponse.json({ error: `Fallo en el servicio de Gemini AI: ${geminiError.message}` }, { status: 500 });
+    // 4. Obtener el texto (en el nuevo SDK .text es una propiedad, no un método)
+    const responseText = response.text;
+
+    if (!responseText) {
+      throw new Error('La IA devolvió una respuesta vacía o inválida.');
     }
 
-    // 3. Extractor de JSON Ultra-Robusto mediante Regex
-    // Esto busca el primer '{' y el último '}' ignorando cualquier texto decorativo que la IA añada por error
-    const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('La IA no devolvió estructuras contenedoras de llaves. Respuesta:', textResponse);
-      return NextResponse.json({ error: 'La IA procesó el ticket pero no formateó la respuesta como un objeto de datos válido.' }, { status: 500 });
-    }
+    // 5. Parsear el JSON seguro
+    const datosExtraidos: EstructuraTicket = JSON.parse(responseText);
 
-    let extractedData;
-    try {
-      extractedData = JSON.parse(jsonMatch[0]);
-    } catch (parseError: any) {
-      console.error('Error parseando JSON de la IA:', parseError, 'Texto bruto:', jsonMatch[0]);
-      return NextResponse.json({ error: 'Los datos devueltos por la IA contienen errores de sintaxis estructural.' }, { status: 500 });
-    }
-
-    // 4. Inserción controlada en la base de datos protegiendo campos nulos o vacíos
-    const { data, error } = await supabase
-      .from('compras')
-      .insert({
-        user_id: user.id,
-        establecimiento: extractedData.establecimiento || 'Establecimiento Desconocido',
-        fecha: extractedData.fecha || new Date().toISOString().split('T')[0],
-        total: parseFloat(extractedData.total) || 0,
-        categoria: extractedData.categoria || 'Otros',
-        items: extractedData.items || [],
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error de Supabase Database:', error);
-      return NextResponse.json({ error: `Error al guardar en base de datos de Supabase: ${error.message}` }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, compra: data });
+    return NextResponse.json({
+      success: true,
+      compra: datosExtraidos,
+    });
 
   } catch (error: any) {
-    console.error('Excepción crítica no controlada:', error);
-    return NextResponse.json({ error: `Fallo crítico del servidor: ${error.message}` }, { status: 500 });
+    console.error('Error en el pipeline de @google/genai:', error);
+    return NextResponse.json(
+      { error: error.message || 'Error interno al procesar el archivo con el nuevo SDK.' },
+      { status: 500 }
+    );
   }
 }
