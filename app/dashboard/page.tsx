@@ -18,6 +18,11 @@ interface Compra {
   items: any[];
 }
 
+// Función auxiliadora para formatear en Euros (€) con formato español (ej: 1.250,45 €)
+const formatEuro = (value: number) => {
+  return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(value);
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -32,7 +37,6 @@ export default function DashboardPage() {
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        // Si no hay sesión, redirigir inmediatamente a la página de login / inicio
         router.push('/');
       } else {
         setUserName(session.user.email || 'Usuario');
@@ -80,7 +84,6 @@ export default function DashboardPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Enviamos la petición inyectando el JWT de Supabase en la cabecera Authorization
       const response = await fetch('/api/procesar', {
         method: 'POST',
         body: formData,
@@ -95,14 +98,12 @@ export default function DashboardPage() {
         throw new Error(data.error || 'Ocurrió un error al procesar el ticket');
       }
 
-      alert(`¡Ticket analizado con éxito!\n\nTienda: ${data.compra.establecimiento}\nTotal: $${data.compra.total}\nCategoría: ${data.compra.categoria}`);
+      alert(`¡Ticket analizado con éxito!\n\nTienda: ${data.compra.establecimiento}\nTotal: ${formatEuro(data.compra.total)}\nCategoría: ${data.compra.categoria}`);
       
       setFile(null);
-      // Reseteamos el input file nativo de la interfaz
       const fileInput = document.getElementById('ticket-input') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
 
-      // Recargamos el listado de compras en tiempo real sin recargar la página entera
       fetchCompras(); 
     } catch (error: any) {
       alert(`Error: ${error.message}`);
@@ -192,7 +193,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Gastado</p>
-              <p className="text-3xl font-extrabold text-slate-800 mt-1">${totalGastado.toFixed(2)}</p>
+              <p className="text-3xl font-extrabold text-slate-800 mt-1">{formatEuro(totalGastado)}</p>
             </div>
             
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
@@ -202,7 +203,7 @@ export default function DashboardPage() {
 
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Gasto Promedio</p>
-              <p className="text-3xl font-extrabold text-slate-800 mt-1">${promedioGasto.toFixed(2)}</p>
+              <p className="text-3xl font-extrabold text-slate-800 mt-1">{formatEuro(promedioGasto)}</p>
             </div>
           </div>
 
@@ -241,7 +242,6 @@ export default function DashboardPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700 text-sm">
                     {compras.map((compra) => {
-                      // Formatear la fecha limpiamente quitando desfases horarios visuales comunes
                       const dateObj = new Date(compra.fecha + 'T00:00:00');
                       const formattedDate = isNaN(dateObj.getTime()) 
                         ? compra.fecha 
@@ -256,7 +256,7 @@ export default function DashboardPage() {
                               {compra.categoria}
                             </span>
                           </td>
-                          <td className="p-4 text-right font-bold text-slate-900">${Number(compra.total).toFixed(2)}</td>
+                          <td className="p-4 text-right font-bold text-slate-900">{formatEuro(Number(compra.total))}</td>
                         </tr>
                       );
                     })}
