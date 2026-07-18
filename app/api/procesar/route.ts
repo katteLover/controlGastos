@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 
-// Inicializamos Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
 export async function POST(request: Request) {
   try {
-    // 1. Extraer el token de autenticación desde las cabeceras (headers)
+    // 1. Diagnóstico preventivo de variables de entorno
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ error: 'Falta la configuración de la variable GEMINI_API_KEY en el servidor.' }, { status: 500 });
+    }
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      return NextResponse.json({ error: 'Faltan las variables de entorno de acceso a Supabase en el backend.' }, { status: 500 });
+    }
+
     const authHeader = request.headers.get('Authorization');
     const token = authHeader?.split(' ')[1];
 
@@ -15,10 +19,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No autorizado - Falta el token de sesión' }, { status: 401 });
     }
 
-    // 2. Inicializar Supabase inyectando el token del usuario para respetar el RLS
+    // Inicializar el cliente usando variables del entorno del servidor de forma segura
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
         global: {
           headers: { Authorization: `Bearer ${token}` },
@@ -26,21 +30,20 @@ export async function POST(request: Request) {
       }
     );
 
-    // Validar el token obteniendo los datos del usuario real
+    // Validar el token contra el motor de autenticación de Supabase
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
-      return NextResponse.json({ error: 'Sesión inválida o expirada' }, { status: 401 });
+      return NextResponse.json({ error: `Sesión inválida o expirada en Supabase: ${authError?.message}` }, { status: 401 });
     }
 
-    // 3. Extraer el archivo del FormData
     const formData = await request.formData();
     const file = formData.get('file') as File;
 
     if (!file) {
-      return NextResponse.json({ error: 'No se proporcionó ningún archivo' }, { status: 400 });
+      return NextResponse.json({ error: 'No se cargó ningún archivo en la petición.' }, { status: 400 });
     }
 
-    // 4. Convertir el archivo a Base64 para Gemini
+    // Convertir archivo a estructura binaria Base64
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const filePart = {
@@ -50,7 +53,8 @@ export async function POST(request: Request) {
       },
     };
 
-    // 5. Llamar a Gemini 1.5 Flash
+    // 2. Ejecutar la llamada a la Inteligencia Artificial de Google
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
     const prompt = `Analiza detalladamente este ticket o factura de compra. 
@@ -70,35 +74,54 @@ export async function POST(request: Request) {
       ]
     }`;
 
-    const result = await model.generateContent([prompt, filePart]);
-    const textResponse = result.response.text().trim();
+    let textResponse = '';
+    try {
+      const result = await model.generateContent([prompt, filePart]);
+      textResponse = result.response.text().trim();
+    } catch (geminiError: any) {
+      console.error('Fallo crítico en la API de Gemini:', geminiError);
+      return NextResponse.json({ error: `Fallo en el servicio de Gemini AI: ${geminiError.message}` }, { status: 500 });
+    }
 
-    const cleanJsonString = textResponse.replace(/```json|```/g, '').trim();
-    const extractedData = JSON.parse(cleanJsonString);
+    // 3. Extractor de JSON Ultra-Robusto mediante Regex
+    // Esto busca el primer '{' y el último '}' ignorando cualquier texto decorativo que la IA añada por error
+    const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('La IA no devolvió estructuras contenedoras de llaves. Respuesta:', textResponse);
+      return NextResponse.json({ error: 'La IA procesó el ticket pero no formateó la respuesta como un objeto de datos válido.' }, { status: 500 });
+    }
 
-    // 6. Guardar la compra en Supabase (usando el user.id validado)
+    let extractedData;
+    try {
+      extractedData = JSON.parse(jsonMatch[0]);
+    } catch (parseError: any) {
+      console.error('Error parseando JSON de la IA:', parseError, 'Texto bruto:', jsonMatch[0]);
+      return NextResponse.json({ error: 'Los datos devueltos por la IA contienen errores de sintaxis estructural.' }, { status: 500 });
+    }
+
+    // 4. Inserción controlada en la base de datos protegiendo campos nulos o vacíos
     const { data, error } = await supabase
       .from('compras')
       .insert({
         user_id: user.id,
-        establecimiento: extractedData.establecimiento,
-        fecha: extractedData.fecha,
-        total: parseFloat(extractedData.total),
-        categoria: extractedData.categoria,
-        items: extractedData.items,
+        establecimiento: extractedData.establecimiento || 'Establecimiento Desconocido',
+        fecha: extractedData.fecha || new Date().toISOString().split('T')[0],
+        total: parseFloat(extractedData.total) || 0,
+        categoria: extractedData.categoria || 'Otros',
+        items: extractedData.items || [],
       })
       .select()
       .single();
 
     if (error) {
-      console.error('Error al guardar en base de datos:', error);
-      return NextResponse.json({ error: 'Error al registrar la compra en la base de datos' }, { status: 500 });
+      console.error('Error de Supabase Database:', error);
+      return NextResponse.json({ error: `Error al guardar en base de datos de Supabase: ${error.message}` }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, compra: data });
 
   } catch (error: any) {
-    console.error('Error en el procesamiento del ticket:', error);
-    return NextResponse.json({ error: 'Error interno del servidor', details: error.message }, { status: 500 });
+    console.error('Excepción crítica no controlada:', error);
+    return NextResponse.json({ error: `Fallo crítico del servidor: ${error.message}` }, { status: 500 });
   }
 }
