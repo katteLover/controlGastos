@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
     // 4. Llamada al modelo Gemini para extraer la información en JSON limpio
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // O el modelo flash que tengas configurado
+      model: 'gemini-3.1-flash-lite', // O el modelo flash que tengas configurado
       contents: [
         {
           inlineData: {
