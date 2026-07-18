@@ -1,106 +1,100 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@supabase/supabase-js';
 
-// 1. Inicializar el nuevo SDK unificado de Google
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Inicializamos los clientes de las plataformas
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
-interface ItemDesglosado {
-  nombre: string;
-  shadow?: boolean;
-  cantidad: number;
-  precio: number;
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-interface EstructuraTicket {
-  establecimiento: string;
-  fecha: string;
-  total: number;
-  categoria: string;
-  items: ItemDesglosado[];
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'La credencial GEMINI_API_KEY no está configurada en el servidor.' },
-        { status: 500 }
-      );
+    // 1. Validar la sesión del usuario mediante el token enviado
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
+    const token = authHeader.split(' ')[1];
 
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
+    // Creamos un cliente de Supabase específico para este usuario usando su token
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    // 2. Extraer el archivo y la URL del ticket del FormData
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    const ticketUrl = formData.get('ticketUrl') as string;
 
     if (!file) {
-      return NextResponse.json(
-        { error: 'No se recibió ningún archivo válido.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No se subió ningún archivo' }, { status: 400 });
     }
 
-    // 2. Convertir el archivo a buffer binario
+    // 3. Convertir el archivo a formato compatible con Gemini
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    const prompt = `
-      Analiza detalladamente esta imagen o documento de ticket de compra.
-      Tu único objetivo es extraer la información y estructurarla exactamente en el siguiente esquema JSON, sin agregar texto extra, formato markdown ni introducciones:
-
-      {
-        "establecimiento": "Nombre comercial de la tienda o empresa",
-        "fecha": "Fecha de emisión en formato estricto YYYY-MM-DD (si no es legible, usa la fecha de hoy)",
-        "total": 0.00, 
-        "categoria": "Clasifícalo exclusivamente en una de estas: Supermercado, Restaurante, Tecnología, Ropa, Transporte, Entretenimiento, Hogar, Otros",
-        "items": [
-          {
-            "nombre": "Descripción simplificada del artículo o servicio",
-            "cantidad": 1,
-            "precio": 0.00
-          }
-        ]
-      }
-
-      Nota: Asegúrate de que los valores numéricos se guarden como floats/numbers y nunca como cadenas de texto.
-    `;
-
-    // 3. Ejecutar la llamada usando la nueva API estructurada: ai.models.generateContent
+    // 4. Llamada al modelo Gemini para extraer la información en JSON limpio
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite', // Tu modelo verificado
+      model: 'gemini-2.5-flash', // O el modelo flash que tengas configurado
       contents: [
-        prompt,
         {
           inlineData: {
             data: buffer.toString('base64'),
             mimeType: file.type,
           },
         },
+        `Analiza este ticket de compra. Extrae la información estrictamente en el siguiente formato JSON válido, sin usar bloques de código de markdown (no uses \`\`\`json):
+        {
+          "establecimiento": "Nombre de la tienda",
+          "fecha": "YYYY-MM-DD",
+          "categoria": "Alimentación, Tecnología, Ropa, Hogar o Otros",
+          "total": 0.00,
+          "items": [
+            { "nombre": "Nombre producto", "cantidad": 1, "precio": 0.00 }
+          ]
+        }`,
       ],
-      config: {
-        // En el nuevo SDK, la configuración va dentro de este objeto nativo y tipado
-        responseMimeType: 'application/json',
-      },
     });
 
-    // 4. Obtener el texto (en el nuevo SDK .text es una propiedad, no un método)
-    const responseText = response.text;
+    const textResult = response.text || '{}';
+    // Limpieza por si Gemini añade caracteres extraños
+    const cleanJsonString = textResult.replace(/```json/g, '').replace(/```/g, '').trim();
+    const extractedData = JSON.parse(cleanJsonString);
 
-    if (!responseText) {
-      throw new Error('La IA devolvió una respuesta vacía o inválida.');
+    // 5. INSERCIÓN EN SUPABASE (Aquí estaba el fallo)
+    // Mapeamos los campos extraídos por la IA junto con la URL de la imagen del Bucket
+    const { data: dbData, error: dbError } = await supabase
+      .from('compras')
+      .insert([
+        {
+          establecimiento: extractedData.establecimiento,
+          fecha: extractedData.fecha,
+          categoria: extractedData.categoria,
+          total: Number(extractedData.total),
+          items: extractedData.items || [], // Asegura que viaje como array
+          ticket_url: ticketUrl || null      // Guardamos la URL de la imagen
+        }
+      ])
+      .select();
+
+    // 🚨 SI SUPABASE DA ERROR, PASAMOS AL CATCH PARA QUE EL FRONTEND SE ENTERE
+    if (dbError) {
+      console.error('Error directo de Supabase:', dbError);
+      throw new Error(`Base de Datos: ${dbError.message} (Código: ${dbError.code})`);
     }
 
-    // 5. Parsear el JSON seguro
-    const datosExtraidos: EstructuraTicket = JSON.parse(responseText);
-
-    return NextResponse.json({
-      success: true,
-      compra: datosExtraidos,
+    // Si todo sale bien, respondemos con éxito
+    return NextResponse.json({ 
+      success: true, 
+      compra: dbData[0] 
     });
 
   } catch (error: any) {
-    console.error('Error en el pipeline de @google/genai:', error);
+    console.error('Error en el endpoint de procesamiento:', error);
     return NextResponse.json(
-      { error: error.message || 'Error interno al procesar el archivo con el nuevo SDK.' },
+      { error: error.message || 'Error interno del servidor' }, 
       { status: 500 }
     );
   }
