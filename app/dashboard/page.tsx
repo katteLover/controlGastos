@@ -1,15 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
-// Inicialización del cliente estándar de Supabase
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-interface ItemDesglosado {
+interface Item {
   nombre: string;
   cantidad: number;
   precio: number;
@@ -21,116 +16,49 @@ interface Compra {
   establecimiento: string;
   categoria: string;
   total: number;
-  items: ItemDesglosado[]; // Tipado estricto para el desglose
+  items: Item[];
   ticket_url?: string;
+  user_id?: string;
 }
 
-// Función auxiliadora para formatear en Euros (€) con formato español
-const formatEuro = (value: number) => {
-  return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(value);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Supermercado: '#10B981',
+  Restaurante: '#F59E0B',
+  Tecnología: '#3B82F6',
+  Ropa: '#EC4899',
+  Transporte: '#8B5CF6',
+  Entretenimiento: '#EF4444',
+  Hogar: '#06B6D4',
+  Otros: '#64748B',
 };
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // --- Estados de Datos ---
   const [compras, setCompras] = useState<Compra[]>([]);
-  const [loadingGastos, setLoadingGastos] = useState(true);
-  const [userName, setUserName] = useState<string>('');
-  
-  // Estado para controlar qué ticket se está visualizando en el modal detallado
+  const [loading, setLoading] = useState(true);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // --- Estados de Filtros y Búsqueda ---
+  const [searchTerm, setSearchTerm] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  // --- Estados Edición/Eliminación ---
   const [selectedCompra, setSelectedCompra] = useState<Compra | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
-  // 1. Verificar sesión del usuario e inicializar datos
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        router.push('/');
-      } else {
-        setUserName(session.user.email || 'Usuario');
-        fetchCompras();
-      }
-    };
-
-    checkUser();
-  }, [router]);
-
-  // Manejar la selección del archivo y generar la vista previa
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0] || null;
-    setFile(selectedFile);
-
-    if (selectedFile) {
-      if (selectedFile.type.startsWith('image/')) {
-        setPreviewUrl(URL.createObjectURL(selectedFile));
-      } else {
-        setPreviewUrl('pdf');
-      }
-    } else {
-      setPreviewUrl(null);
-    }
+  const formatEuro = (value: number) => {
+    return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(value);
   };
 
-  // Función nativa para comprimir imágenes usando Canvas
-  const compressImage = (imageFile: File, quality = 0.6): Promise<File> => {
-    return new Promise((resolve, reject) => {
-      if (!imageFile.type.startsWith('image/')) {
-        return resolve(imageFile);
-      }
-
-      const reader = new FileReader();
-      reader.readAsDataURL(imageFile);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target?.result as string;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-
-          const MAX_WIDTH = 1200;
-          if (width > MAX_WIDTH) {
-            height = Math.round((height * MAX_WIDTH) / width);
-            width = MAX_WIDTH;
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-
-          canvas.toBlob(
-            (blob) => {
-              if (blob) {
-                const compressed = new File([blob], imageFile.name, {
-                  type: imageFile.type,
-                  lastModified: Date.now(),
-                });
-                resolve(compressed);
-              } else {
-                resolve(imageFile);
-              }
-            },
-            imageFile.type,
-            quality
-          );
-        };
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  // 2. Obtener las compras reales de Supabase
-  const fetchCompras = async () => {
+  const fetchCompras = useCallback(async () => {
     try {
-      setLoadingGastos(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
+      setLoading(true);
       const { data, error } = await supabase
         .from('compras')
         .select('*')
@@ -139,307 +67,424 @@ export default function DashboardPage() {
       if (error) throw error;
       setCompras(data || []);
     } catch (error: any) {
-      console.error('Error cargando compras:', error.message);
+      alert(`Error al cargar el historial: ${error.message}`);
     } finally {
-      setLoadingGastos(false);
+      setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    fetchCompras();
+    setIsMounted(true);
+  }, [fetchCompras]);
+
+  // --- Lógica del Filtro Reactivo Dinámico ---
+  const filteredCompras = useMemo(() => {
+    return compras.filter((compra) => {
+      // 1. Filtro por nombre de establecimiento (IgnoreCase)
+      const matchesSearch = compra.establecimiento
+        ?.toLowerCase()
+        .includes(searchTerm.toLowerCase());
+
+      // 2. Filtro por Rango de Fechas (Comparación directa de cadenas YYYY-MM-DD segura)
+      const matchesStart = startDate ? compra.fecha >= startDate : true;
+      const matchesEnd = endDate ? compra.fecha <= endDate : true;
+
+      return matchesSearch && matchesStart && matchesEnd;
+    });
+  }, [compras, searchTerm, startDate, endDate]);
+
+  // --- Recálculo de Métricas basadas estrictamente en los datos filtrados ---
+  const totalGastado = filteredCompras.reduce((acc, curr) => acc + Number(curr.total), 0);
+  const promedioGasto = filteredCompras.length > 0 ? totalGastado / filteredCompras.length : 0;
+
+  const chartData = useMemo(() => {
+    const agrupado: Record<string, number> = {};
+    filteredCompras.forEach((c) => {
+      agrupado[c.categoria] = (agrupado[c.categoria] || 0) + Number(c.total);
+    });
+    
+    return Object.keys(agrupado).map((cat) => ({
+      name: cat,
+      value: parseFloat(agrupado[cat].toFixed(2)),
+    }));
+  }, [filteredCompras]);
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStartDate('');
+    setEndDate('');
   };
 
-  // 3. Comprimir, subir al Bucket y procesar con Gemini
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file) return alert('Por favor, selecciona una foto o PDF de tu ticket primero.');
-
-    setLoading(true);
+  // --- Operaciones CRUD e IA ---
+  const handleFileScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('No se encontró una sesión activa.');
-
-      let fileToUpload = file;
-      if (file.type.startsWith('image/')) {
-        fileToUpload = await compressImage(file, 0.6);
-      }
+      setIsScanning(true);
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) throw new Error('No se encontró una sesión activa de usuario.');
 
       const fileExt = file.name.split('.').pop();
-      const uniqueFileName = `${session.user.id}/${Date.now()}.${fileExt}`;
-      const filePath = `comprobantes/${uniqueFileName}`;
+      const fileName = `${session.user.id}/${Date.now()}.${fileExt}`;
+      const filePath = `comprobantes/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('tickets')
-        .upload(filePath, fileToUpload, { cacheControl: '3600', upsert: true });
-
-      if (uploadError) {
-        throw new Error(`Error en el Storage: ${uploadError.message}`);
-      }
+      const { error: uploadError } = await supabase.storage.from('tickets').upload(filePath, file);
+      if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('tickets').getPublicUrl(filePath);
 
       const formData = new FormData();
-      formData.append('file', fileToUpload);
+      formData.append('file', file);
       formData.append('ticketUrl', publicUrl);
 
       const response = await fetch('/api/procesar', {
         method: 'POST',
-        body: formData,
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+        body: formData
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Error al procesar el ticket');
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Error al procesar el ticket con la IA.');
 
-      alert(`¡Ticket analizado con éxito!\n\nTienda: ${data.compra.establecimiento}\nTotal: ${formatEuro(data.compra.total)}`);
-      
-      setFile(null);
-      setPreviewUrl(null);
-      const fileInput = document.getElementById('ticket-input') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-
-      fetchCompras(); 
+      alert(`¡Escaneo exitoso! Registrado en ${result.compra.establecimiento}.`);
+      fetchCompras();
     } catch (error: any) {
-      alert(`Error: ${error.message}`);
+      alert(`Error en el escaneo: ${error.message}`);
     } finally {
-      setLoading(false);
+      setIsScanning(false);
+      if (e.target) e.target.value = '';
     }
   };
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.push('/');
+  const handleEditItemChange = (index: number, field: keyof Item, value: any) => {
+    if (!selectedCompra || !selectedCompra.items) return;
+    const updatedItems = [...selectedCompra.items];
+    updatedItems[index] = { ...updatedItems[index], [field]: value };
+
+    const nuevoTotal = updatedItems.reduce((acc, item) => {
+      return acc + ((Number(item.cantidad) || 0) * (Number(item.precio) || 0));
+    }, 0);
+
+    setSelectedCompra({
+      ...selectedCompra,
+      items: updatedItems,
+      total: parseFloat(nuevoTotal.toFixed(2))
+    });
   };
 
-  const totalGastado = compras.reduce((acc, item) => acc + Number(item.total), 0);
-  const totalTickets = compras.length;
-  const promedioGasto = totalTickets > 0 ? totalGastado / totalTickets : 0;
+  const handleUpdateExisting = async () => {
+    if (!selectedCompra) return;
+    try {
+      const { error } = await supabase
+        .from('compras')
+        .update({
+          establecimiento: selectedCompra.establecimiento,
+          fecha: selectedCompra.fecha,
+          categoria: selectedCompra.categoria,
+          total: selectedCompra.total,
+          items: selectedCompra.items
+        })
+        .eq('id', selectedCompra.id);
+
+      if (error) throw error;
+      setShowEditModal(false);
+      fetchCompras();
+      alert('Gasto modificado correctamente.');
+    } catch (error: any) {
+      alert(`Error al actualizar: ${error.message}`);
+    }
+  };
+
+  const handleDeleteExisting = async (id: string, ticketUrl?: string) => {
+    if (!confirm('¿Estás seguro de eliminar este gasto de forma permanente?')) return;
+    try {
+      const { error: dbError } = await supabase.from('compras').delete().eq('id', id);
+      if (dbError) throw dbError;
+
+      if (ticketUrl) {
+        const match = ticketUrl.match(/comprobantes\/.+/);
+        if (match) await supabase.storage.from('tickets').remove([match[0]]);
+      }
+
+      setShowEditModal(false);
+      fetchCompras();
+      alert('Gasto eliminado.');
+    } catch (error: any) {
+      alert(`Error al eliminar: ${error.message}`);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      <nav className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
-        <div>
-          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-            ControlGastos AI
-          </h1>
-          <p className="text-xs text-slate-500">Sesión: {userName}</p>
-        </div>
-        <button onClick={handleSignOut} className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-100 transition">
-          Cerrar Sesión
-        </button>
-      </nav>
-
-      <main className="max-w-6xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 font-sans antialiased text-slate-900">
+      <div className="max-w-6xl mx-auto space-y-8">
         
-        {/* Formulario de Carga */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-slate-700 mb-2">Escanear Nuevo Ticket</h2>
-            <p className="text-xs text-slate-500 mb-4">Sube un comprobante para guardarlo en la nube y extraer sus productos.</p>
+        {/* Encabezado */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b pb-6">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 md:text-3xl">Control de Gastos Inteligente</h1>
+            <p className="text-sm text-slate-500 mt-1">Filtrado en tiempo real impulsado por Gemini 3.1 Flash Lite en el backend.</p>
+          </div>
 
-            <form onSubmit={handleUpload} className="space-y-4">
-              <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-blue-500 transition cursor-pointer relative bg-slate-50 min-h-[160px] flex flex-col justify-center items-center">
-                <input id="ticket-input" type="file" accept="image/*,application/pdf" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                
-                {previewUrl ? (
-                  <div className="space-y-2 w-full z-20 pointer-events-none">
-                    {previewUrl === 'pdf' ? (
-                      <div className="flex flex-col items-center py-4">
-                        <svg className="h-12 w-12 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path fillRule="evenodd" d="M6 6a1 1 0 011-1h3v3a1 1 0 001 1h3v7a1 1 0 01-1 1H7a1 1 0 01-1-1V6z" clipRule="evenodd"/></svg>
-                        <p className="text-xs font-medium text-slate-600 mt-1">{file?.name}</p>
-                      </div>
-                    ) : (
-                      <div className="relative rounded-lg overflow-hidden border bg-black/5 max-h-48 flex justify-center">
-                        <img src={previewUrl} alt="Vista previa ticket" className="object-contain h-40" />
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <svg className="mx-auto h-10 w-10 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    <p className="text-sm font-medium text-slate-600">Seleccionar comprobante</p>
-                  </div>
-                )}
-              </div>
-
-              <button type="submit" disabled={loading || !file} className={`w-full py-3 px-4 rounded-xl text-white font-medium shadow-md transition ${loading || !file ? 'bg-slate-300 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600'}`}>
-                {loading ? 'Procesando...' : 'Analizar y Subir'}
-              </button>
-            </form>
+          <div>
+            <label className={`flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-200 hover:bg-blue-700 transition cursor-pointer select-none ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}>
+              <span>{isScanning ? '🔄 Leyendo ticket con IA...' : '📷 Escanear Nuevo Ticket'}</span>
+              <input type="file" accept="image/*,application/pdf" capture="environment" onChange={handleFileScan} className="hidden" disabled={isScanning} />
+            </label>
           </div>
         </div>
 
-        {/* Métricas e Historial */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Gastado</p>
-              <p className="text-3xl font-extrabold text-slate-800 mt-1">{formatEuro(totalGastado)}</p>
+        {/* CONTENEDOR DE MÉTRICAS Y GRÁFICO (SE ACTUALIZAN CON LOS FILTROS) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="flex flex-col justify-between gap-4 lg:col-span-1">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Gastado (Filtrado)</span>
+              <h3 className="text-3xl font-black text-slate-900 mt-1">{formatEuro(totalGastado)}</h3>
             </div>
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tickets</p>
-              <p className="text-3xl font-extrabold text-slate-800 mt-1">{totalTickets}</p>
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Tickets Encontrados</span>
+              <h3 className="text-3xl font-black text-slate-900 mt-1">{filteredCompras.length}</h3>
             </div>
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Promedio</p>
-              <p className="text-3xl font-extrabold text-slate-800 mt-1">{formatEuro(promedioGasto)}</p>
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Gasto Promedio</span>
+              <h3 className="text-3xl font-black text-slate-900 mt-1">{formatEuro(promedioGasto)}</h3>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-bold text-slate-700 text-lg">Historial de Compras</h3>
-              <button onClick={fetchCompras} className="text-xs font-medium text-blue-600 hover:underline">Actualizar</button>
+          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm lg:col-span-2 flex flex-col justify-between min-h-[260px]">
+            <div className="border-b pb-2 mb-2">
+              <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Distribución Segmentada</h3>
             </div>
-            
-            {loadingGastos ? (
-              <div className="p-12 text-center text-slate-400">Cargando...</div>
-            ) : compras.length === 0 ? (
-              <div className="p-12 text-center text-slate-400">No hay transacciones</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50/70 text-slate-500 font-semibold text-xs border-b border-slate-100 uppercase tracking-wider">
-                      <th className="p-4">Fecha</th>
-                      <th className="p-4">Establecimiento</th>
-                      <th className="p-4">Categoría</th>
-                      <th className="p-4 text-center">Detalles</th>
-                      <th className="p-4 text-right">Monto</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700 text-sm">
-                    {compras.map((compra) => {
-                      const dateObj = new Date(compra.fecha + 'T00:00:00');
-                      const formattedDate = isNaN(dateObj.getTime()) ? compra.fecha : dateObj.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+            <div className="flex-1 w-full h-[200px] flex items-center justify-center">
+              {loading ? (
+                <p className="text-xs font-medium text-slate-400">Cargando...</p>
+              ) : filteredCompras.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No hay datos en el rango seleccionado.</p>
+              ) : isMounted ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={chartData} cx="40%" cy="50%" innerRadius={55} outerRadius={75} paddingAngle={3} dataKey="value">
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.name] || '#64748B'} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => formatEuro(value)} />
+                    <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px', paddingLeft: '10px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : null}
+            </div>
+          </div>
+        </div>
 
-                      return (
-                        <tr key={compra.id} className="hover:bg-slate-50/50 transition">
-                          <td className="p-4 text-slate-500 whitespace-nowrap">{formattedDate}</td>
-                          <td className="p-4 font-semibold text-slate-900">{compra.establecimiento}</td>
-                          <td className="p-4">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
-                              {compra.categoria}
-                            </span>
-                          </td>
-                          
-                          {/* Botón dinámico que abre el modal */}
-                          <td className="p-4 text-center">
-                            <button
-                              onClick={() => setSelectedCompra(compra)}
-                              className="inline-flex items-center text-xs font-medium text-indigo-600 hover:text-indigo-900 bg-indigo-50 px-3 py-1.5 rounded-md border border-indigo-100 transition"
-                            >
-                              Ver desglose 🔍
-                            </button>
-                          </td>
-                          
-                          <td className="p-4 text-right font-bold text-slate-900">{formatEuro(Number(compra.total))}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+        {/* BLOQUE DE FILTROS AVANZADOS */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Buscar por Comercio</label>
+            <input 
+              type="text" 
+              placeholder="Ej. Mercadona, Amazon..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Desde (Fecha)</label>
+            <input 
+              type="date" 
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <div className="flex gap-2 items-center">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hasta (Fecha)</label>
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+            {(searchTerm || startDate || endDate) && (
+              <button 
+                type="button" 
+                onClick={resetFilters} 
+                className="px-3 py-2 bg-slate-100 text-slate-600 font-medium text-xs rounded-xl hover:bg-slate-200 transition mt-5 h-[38px]"
+                title="Limpiar filtros"
+              >
+                ✕ Limpiar
+              </button>
             )}
           </div>
         </div>
-      </main>
 
-      {/* MODAL DETALLADO RESPONSIVE: Muestra productos e imagen lado a lado */}
-      {selectedCompra && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all duration-200">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-150">
+        {/* Tabla / Historial Principal */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+            <h2 className="font-bold text-slate-800 text-base">Historial de Transacciones</h2>
+            {filteredCompras.length !== compras.length && (
+              <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-semibold">
+                Mostrando {filteredCompras.length} de {compras.length} registros
+              </span>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="p-12 text-center text-sm text-slate-400 font-medium">Cargando transacciones de la base de datos...</div>
+          ) : filteredCompras.length === 0 ? (
+            <div className="p-12 text-center text-sm text-slate-400 italic">No se encontraron transacciones que coincidan con los filtros aplicados.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider border-b">
+                  <tr>
+                    <th className="p-4">Fecha</th>
+                    <th className="p-4">Establecimiento</th>
+                    <th className="p-4">Categoría</th>
+                    <th className="p-4 text-center">Ticket / Acción</th>
+                    <th className="p-4 text-right">Importe</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {filteredCompras.map((compra) => (
+                    <tr key={compra.id} className="hover:bg-slate-50/50 transition">
+                      <td className="p-4 text-slate-500 whitespace-nowrap">{compra.fecha}</td>
+                      <td className="p-4 font-semibold text-slate-900">{compra.establecimiento}</td>
+                      <td className="p-4">
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: `${CATEGORY_COLORS[compra.categoria]}15`, color: CATEGORY_COLORS[compra.categoria] }}>
+                          {compra.categoria}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center justify-center gap-2">
+                          {compra.ticket_url && (
+                            <a href={compra.ticket_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100 transition">
+                              Ver original ↗
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedCompra(JSON.parse(JSON.stringify(compra)));
+                              setShowEditModal(true);
+                            }}
+                            className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-md hover:bg-slate-200 transition"
+                          >
+                            ✏️ Editar
+                          </button>
+                        </div>
+                      </td>
+                      <td className="p-4 text-right font-bold text-slate-900 whitespace-nowrap">{formatEuro(Number(compra.total))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* MODAL LADO A LADO PARA EDITAR / ELIMINAR */}
+      {showEditModal && selectedCompra && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex justify-center items-center z-50 p-4 md:p-6 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-5xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             
-            {/* Cabecera del Modal */}
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <div>
-                <h3 className="text-xl font-bold text-slate-800">{selectedCompra.establecimiento}</h3>
-                <p className="text-xs text-slate-500">
-                  {new Date(selectedCompra.fecha + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
-                </p>
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div className="flex items-center gap-4">
+                <h3 className="font-bold text-slate-800 text-lg">Modificar Registro Guardado</h3>
+                <button type="button" onClick={() => handleDeleteExisting(selectedCompra.id, selectedCompra.ticket_url)} className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 transition">
+                  🗑️ Eliminar permanentemente
+                </button>
               </div>
-              <button 
-                onClick={() => setSelectedCompra(null)} 
-                className="text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-200/70 transition"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
+              <button onClick={() => setShowEditModal(false)} className="text-slate-400 hover:text-slate-600 text-xl font-medium p-1">✕</button>
             </div>
 
-            {/* Cuerpo del Modal (Adaptable a 2 columnas en pantallas medianas) */}
-            <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-8 content-start">
-              
-              {/* COLUMNA MODAL 1: Visualizador Integrado del Ticket */}
-              <div className="flex flex-col items-center justify-center border border-slate-100 rounded-xl bg-slate-50/70 p-4 min-h-[250px]">
-                <h4 className="font-bold text-slate-400 text-xs uppercase tracking-wider mb-3 self-start">Copia Digital Guardada</h4>
+            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0">
+              <div className="bg-slate-100 rounded-xl p-3 border border-slate-200 flex flex-col justify-center items-center min-h-[250px] md:max-h-[550px] overflow-hidden">
                 {selectedCompra.ticket_url ? (
-                  selectedCompra.ticket_url.toLowerCase().endsWith('.pdf') ? (
-                    <div className="text-center py-6">
-                      <svg className="h-16 w-16 text-red-500 mx-auto" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/>
-                      </svg>
-                      <a href={selectedCompra.ticket_url} target="_blank" rel="noreferrer" className="mt-4 inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm transition">
-                        Ver PDF en pestaña nueva ↗
-                      </a>
+                  selectedCompra.ticket_url.includes('.pdf') ? (
+                    <div className="text-center p-6">
+                      <p className="text-sm font-medium text-slate-700">Documento PDF del ticket</p>
+                      <a href={selectedCompra.ticket_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline mt-2 inline-block">Abrir PDF en pestaña nueva ↗</a>
                     </div>
                   ) : (
-                    <div className="relative w-full flex justify-center group">
-                      <img 
-                        src={selectedCompra.ticket_url} 
-                        alt="Comprobante de compra" 
-                        className="max-h-[45vh] md:max-h-[50vh] object-contain rounded-lg border border-slate-200 shadow-sm bg-white" 
-                      />
-                      <a 
-                        href={selectedCompra.ticket_url} 
-                        target="_blank" 
-                        rel="noreferrer" 
-                        className="absolute bottom-3 right-3 bg-slate-900/80 hover:bg-slate-900 text-white text-xs py-1.5 px-2.5 rounded-md backdrop-blur-xs transition opacity-0 group-hover:opacity-100 hidden md:block"
-                      >
-                        Ampliar imagen ↗
-                      </a>
-                    </div>
+                    <img src={selectedCompra.ticket_url} alt="Comprobante físico" className="max-w-full max-h-[480px] object-contain rounded-lg shadow-sm" />
                   )
                 ) : (
-                  <p className="text-xs text-slate-400 italic">No se adjuntó archivo visual a este registro.</p>
+                  <p className="text-xs text-slate-400 italic">Este gasto no tiene un archivo físico asociado.</p>
                 )}
               </div>
 
-              {/* COLUMNA MODAL 2: Lista Completa de Artículos */}
-              <div className="flex flex-col justify-between h-full min-h-[250px]">
-                <div>
-                  <h4 className="font-bold text-slate-400 text-xs uppercase tracking-wider mb-4">Artículos Extraídos ({selectedCompra.items?.length || 0})</h4>
-                  <div className="divide-y divide-slate-100 max-h-[35vh] overflow-y-auto pr-2 border-b border-slate-150">
-                    {selectedCompra.items && selectedCompra.items.length > 0 ? (
-                      selectedCompra.items.map((item, idx) => (
-                        <div key={idx} className="py-3 flex justify-between items-start text-sm hover:bg-slate-50/50 px-1 rounded-md transition">
-                          <div className="max-w-[70%]">
-                            <p className="font-semibold text-slate-800 leading-tight">{item.nombre}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">Unidades: {item.cantidad || 1}</p>
-                          </div>
-                          <p className="font-bold text-slate-700 text-right whitespace-nowrap">
-                            {formatEuro(Number(item.precio))}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-slate-400 italic py-6 text-center">Este ticket se procesó sin desglose de artículos individuales.</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Resumen Final Inferior */}
-                <div className="mt-6 pt-4 bg-slate-50 rounded-xl p-4 border border-slate-100 flex justify-between items-center">
+              <div className="space-y-4 flex flex-col justify-between">
+                <div className="space-y-4">
                   <div>
-                    <span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block">Categoría</span>
-                    <span className="text-xs font-semibold bg-white text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200 shadow-xs inline-block mt-0.5 capitalize">{selectedCompra.categoria}</span>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Establecimiento</label>
+                    <input type="text" value={selectedCompra.establecimiento || ''} onChange={(e) => setSelectedCompra({ ...selectedCompra, establecimiento: e.target.value })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                   </div>
-                  <div className="text-right">
-                    <span className="font-bold text-slate-400 uppercase text-[10px] tracking-widest block">Importe Total</span>
-                    <span className="text-2xl font-black text-slate-900 tracking-tight">{formatEuro(Number(selectedCompra.total))}</span>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha</label>
+                      <input type="date" value={selectedCompra.fecha || ''} onChange={(e) => setSelectedCompra({ ...selectedCompra, fecha: e.target.value })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoría</label>
+                      <select value={selectedCompra.categoria || 'Otros'} onChange={(e) => setSelectedCompra({ ...selectedCompra, categoria: e.target.value })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                        <option value="Supermercado">Supermercado</option>
+                        <option value="Restaurante">Restaurante</option>
+                        <option value="Tecnología">Tecnología</option>
+                        <option value="Ropa">Ropa</option>
+                        <option value="Transporte">Transporte</option>
+                        <option value="Entretenimiento">Entretenimiento</option>
+                        <option value="Hogar">Hogar</option>
+                        <option value="Otros">Otros</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Importe Total Acumulado (€)</label>
+                    <input type="number" step="0.01" value={selectedCompra.total || 0} onChange={(e) => setSelectedCompra({ ...selectedCompra, total: parseFloat(e.target.value) || 0 })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Desglose de Artículos</label>
+                    <div className="border rounded-xl max-h-[180px] overflow-y-auto bg-slate-50">
+                      {(!selectedCompra.items || selectedCompra.items.length === 0) ? (
+                        <p className="p-4 text-xs text-slate-400 italic text-center">Sin artículos detallados en este ticket.</p>
+                      ) : (
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 text-slate-500 sticky top-0 font-bold">
+                            <tr>
+                              <th className="p-2 w-7/12">Producto</th>
+                              <th className="p-2 w-2/12 text-center">Cant.</th>
+                              <th className="p-2 w-3/12 text-right">Precio Un.</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y bg-white">
+                            {selectedCompra.items.map((item: any, idx: number) => (
+                              <tr key={idx}>
+                                <td className="p-1"><input type="text" value={item.nombre || ''} onChange={(e) => handleEditItemChange(idx, 'nombre', e.target.value)} className="w-full px-1 py-0.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none" /></td>
+                                <td className="p-1"><input type="number" value={item.cantidad ?? 1} onChange={(e) => handleEditItemChange(idx, 'cantidad', parseInt(e.target.value) || 0)} className="w-full text-center px-1 py-0.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none" /></td>
+                                <td className="p-1"><input type="number" step="0.01" value={item.precio ?? 0} onChange={(e) => handleEditItemChange(idx, 'precio', parseFloat(e.target.value) || 0)} className="w-full text-right px-1 py-0.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none font-medium" /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   </div>
                 </div>
 
+                <div className="pt-4 border-t flex gap-3 justify-end bg-white">
+                  <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2 border rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancelar</button>
+                  <button type="button" onClick={handleUpdateExisting} className="px-5 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-md transition">Guardar Cambios</button>
+                </div>
               </div>
 
             </div>

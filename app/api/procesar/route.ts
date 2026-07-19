@@ -2,42 +2,43 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 
-// Inicializamos los clientes de las plataformas
+// Inicialización de la API de Google Gen AI
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
+// Credenciales de Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Validar la sesión del usuario mediante el token enviado
+    // 1. Validar la sesión del usuario mediante el token Bearer
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+      return NextResponse.json({ error: 'No autorizado - Falta token de sesión' }, { status: 401 });
     }
     const token = authHeader.split(' ')[1];
 
-    // Creamos un cliente de Supabase específico para este usuario usando su token
+    // Cliente dinámico de Supabase para respetar el RLS del usuario actual
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
 
-    // 2. Extraer el archivo y la URL del ticket del FormData
+    // 2. Extraer el archivo de imagen y la URL del Bucket desde el FormData
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const ticketUrl = formData.get('ticketUrl') as string;
 
     if (!file) {
-      return NextResponse.json({ error: 'No se subió ningún archivo' }, { status: 400 });
+      return NextResponse.json({ error: 'No se ha subido ningún archivo' }, { status: 400 });
     }
 
-    // 3. Convertir el archivo a formato compatible con Gemini
+    // 3. Transformar el archivo a Buffer binario para pasarlo a la IA
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // 4. Llamada al modelo Gemini para extraer la información en JSON limpio
+    // 4. Invocación al modelo optimizado Gemini 3.1 Flash Lite
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite', // O el modelo flash que tengas configurado
+      model: 'gemini-3.1-flash-lite',
       contents: [
         {
           inlineData: {
@@ -45,26 +46,25 @@ export async function POST(req: NextRequest) {
             mimeType: file.type,
           },
         },
-        `Analiza este ticket de compra. Extrae la información estrictamente en el siguiente formato JSON válido, sin usar bloques de código de markdown (no uses \`\`\`json):
+        `Analiza este ticket de compra. Extrae la información estrictamente en el siguiente formato JSON válido, sin usar bloques de código de markdown (no utilices \`\`\`json ni cierres):
         {
-          "establecimiento": "Nombre de la tienda",
+          "establecimiento": "Nombre comercial de la tienda",
           "fecha": "YYYY-MM-DD",
-          "categoria": "Alimentación, Tecnología, Ropa, Hogar o Otros",
+          "categoria": "Supermercado, Restaurante, Tecnología, Ropa, Transporte, Entretenimiento, Hogar o Otros",
           "total": 0.00,
           "items": [
-            { "nombre": "Nombre producto", "cantidad": 1, "precio": 0.00 }
+            { "nombre": "Nombre del artículo", "cantidad": 1, "precio": 0.00 }
           ]
         }`,
       ],
     });
 
     const textResult = response.text || '{}';
-    // Limpieza por si Gemini añade caracteres extraños
+    // Limpieza de seguridad por si el modelo incluye marcas de código Markdown
     const cleanJsonString = textResult.replace(/```json/g, '').replace(/```/g, '').trim();
     const extractedData = JSON.parse(cleanJsonString);
 
-    // 5. INSERCIÓN EN SUPABASE (Aquí estaba el fallo)
-    // Mapeamos los campos extraídos por la IA junto con la URL de la imagen del Bucket
+    // 5. Inserción directa en la base de datos controlada por RLS
     const { data: dbData, error: dbError } = await supabase
       .from('compras')
       .insert([
@@ -73,28 +73,27 @@ export async function POST(req: NextRequest) {
           fecha: extractedData.fecha,
           categoria: extractedData.categoria,
           total: Number(extractedData.total),
-          items: extractedData.items || [], // Asegura que viaje como array
-          ticket_url: ticketUrl || null      // Guardamos la URL de la imagen
+          items: extractedData.items || [],
+          ticket_url: ticketUrl || null
         }
       ])
       .select();
 
-    // 🚨 SI SUPABASE DA ERROR, PASAMOS AL CATCH PARA QUE EL FRONTEND SE ENTERE
+    // Si la política RLS o la estructura falla, lanzamos una excepción clara
     if (dbError) {
-      console.error('Error directo de Supabase:', dbError);
+      console.error('Error detectado en Supabase:', dbError);
       throw new Error(`Base de Datos: ${dbError.message} (Código: ${dbError.code})`);
     }
 
-    // Si todo sale bien, respondemos con éxito
     return NextResponse.json({ 
       success: true, 
       compra: dbData[0] 
     });
 
   } catch (error: any) {
-    console.error('Error en el endpoint de procesamiento:', error);
+    console.error('Fallo en el flujo del endpoint:', error);
     return NextResponse.json(
-      { error: error.message || 'Error interno del servidor' }, 
+      { error: error.message || 'Error interno en el procesamiento del servidor' }, 
       { status: 500 }
     );
   }
