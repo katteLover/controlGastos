@@ -1,3 +1,14 @@
+export interface Profile {
+  id: string;
+  email?: string;
+  full_name?: string;
+  nombre?: string;
+  role?: string;
+  is_admin?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ItemGasto {
   id?: string;
   gasto_id?: string;
@@ -5,17 +16,17 @@ export interface ItemGasto {
   cantidad: number;
   precio_unitario: number;
   monto_total: number;
-  subcategoria: string; // Texto libre (ej. Lácteos, Carnicería, Herramientas, Calzado)
+  subcategoria: string;
 }
 
 export interface Gasto {
   id: string;
   created_at?: string;
-  fecha: string; // YYYY-MM-DD
+  fecha: string;
   comercio: string;
   categoria_general: string;
   monto_total: number;
-  moneda: string; // EUR
+  moneda: string;
   url_comprobante?: string;
   user_id?: string;
   items_gasto?: ItemGasto[];
