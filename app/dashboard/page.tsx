@@ -54,26 +54,33 @@ export default function DashboardPage() {
   const [mesSeleccionado, setMesSeleccionado] = useState<string>('todos');
   const [gastoExpandido, setGastoExpandido] = useState<string | null>(null);
 
-  const cargarGastos = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabaseClient
+ const cargarGastos = async () => {
+  setLoading(true);
+  try {
+    const { data, error } = await supabaseClient
+      .from('gastos')
+      .select('*, items_gasto(*)')
+      .order('fecha', { ascending: false });
+
+    if (error) {
+      console.error('Error detallado de Supabase:', error.message, error.details, error.hint);
+      
+      // Fallback: si falla el join con items_gasto, intentar cargar solo los gastos
+      const { data: fallbackData } = await supabaseClient
         .from('gastos')
-        .select('*, items_gasto(*)')
+        .select('*')
         .order('fecha', { ascending: false });
 
-      if (error) {
-        console.error('Error al cargar gastos:', error);
-        Swal.fire('Error', 'No se pudieron consultar los tickets desde Supabase.', 'error');
-      } else {
-        setGastos(data || []);
-      }
-    } catch (err) {
-      console.error('Error inesperado:', err);
-    } finally {
-      setLoading(false);
+      setGastos(fallbackData || []);
+    } else {
+      setGastos(data || []);
     }
-  };
+  } catch (err: any) {
+    console.error('Error inesperado al cargar gastos:', err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     cargarGastos();
