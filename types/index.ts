@@ -32,9 +32,26 @@ export interface Gasto {
   items_gasto?: ItemGasto[];
 }
 
-// Aliases para compatibilidad con componentes en inglés/español
+// Aliases para compatibilidad con hooks/componentes
 export type Purchase = Gasto;
 export type PurchaseItem = ItemGasto;
+
+export interface FilterState {
+  search?: string;
+  busqueda?: string;
+  category?: string;
+  categoria?: string;
+  subcategoria?: string;
+  merchant?: string;
+  comercio?: string;
+  startDate?: string;
+  fechaInicio?: string;
+  endDate?: string;
+  fechaFin?: string;
+  mes?: string;
+  minAmount?: number;
+  maxAmount?: number;
+}
 
 export interface MetricaSubcategoria {
   subcategoria: string;
