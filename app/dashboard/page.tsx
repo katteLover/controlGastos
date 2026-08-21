@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabaseClient } from '@/lib/supabase-client';
 import UploadModal from '@/components/UploadModal';
+import EditTicketModal from '@/components/EditTicketModal';
 import Swal from 'sweetalert2';
 import {
   ResponsiveContainer,
@@ -61,6 +62,8 @@ export default function DashboardPage() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [modalUploadAbierto, setModalUploadAbierto] = useState<boolean>(false);
+  const [gastoAEditar, setGastoAEditar] = useState<Gasto | null>(null);
+
   const [mesSeleccionado, setMesSeleccionado] = useState<string>('');
   const [gastoExpandido, setGastoExpandido] = useState<string | null>(null);
   const [subcategoriaSeleccionada, setSubcategoriaSeleccionada] = useState<string | null>(null);
@@ -94,7 +97,6 @@ export default function DashboardPage() {
     cargarGastos();
   }, []);
 
-  // Extraer meses con tickets disponibles ordenados descendentemente
   const mesesDisponibles = useMemo(() => {
     const mesesSet = new Set<string>();
     gastos.forEach((g) => {
@@ -105,14 +107,12 @@ export default function DashboardPage() {
     return Array.from(mesesSet).sort().reverse();
   }, [gastos]);
 
-  // Asignar por defecto el mes más reciente con datos
   useEffect(() => {
     if (mesesDisponibles.length > 0 && !mesSeleccionado) {
       setMesSeleccionado(mesesDisponibles[0]);
     }
   }, [mesesDisponibles, mesSeleccionado]);
 
-  // Filtrado de gastos por mes seleccionado
   const gastosFiltrados = useMemo(() => {
     if (!mesSeleccionado || mesSeleccionado === 'todos') {
       return gastos;
@@ -120,12 +120,10 @@ export default function DashboardPage() {
     return gastos.filter((g) => g.fecha?.startsWith(mesSeleccionado));
   }, [gastos, mesSeleccionado]);
 
-  // Métrica Total Filtrado
   const totalFiltrado = useMemo(() => {
     return gastosFiltrados.reduce((acc, curr) => acc + (Number(curr.monto_total) || 0), 0);
   }, [gastosFiltrados]);
 
-  // Datos Agrupados por Categoría General
   const datosPorCategoria = useMemo(() => {
     const mapa: Record<string, number> = {};
     gastosFiltrados.forEach((g) => {
@@ -139,7 +137,6 @@ export default function DashboardPage() {
     }));
   }, [gastosFiltrados]);
 
-  // Todos los ítems desglosados del período filtrado
   const todosLosItems = useMemo<ItemExtendido[]>(() => {
     const itemsList: ItemExtendido[] = [];
     gastosFiltrados.forEach((g) => {
@@ -156,7 +153,6 @@ export default function DashboardPage() {
     return itemsList;
   }, [gastosFiltrados]);
 
-  // Agrupamiento por Subcategoría
   const datosPorSubcategoria = useMemo(() => {
     const mapa: Record<string, number> = {};
     todosLosItems.forEach((item) => {
@@ -172,19 +168,16 @@ export default function DashboardPage() {
       .sort((a, b) => b.total - a.total);
   }, [todosLosItems]);
 
-  // Subcategoría TOP con mayor gasto
   const subcategoriaTop = useMemo(() => {
     return datosPorSubcategoria.length > 0 ? datosPorSubcategoria[0] : null;
   }, [datosPorSubcategoria]);
 
-  // Top 10 Productos Más Caros
   const top10Productos = useMemo(() => {
     return [...todosLosItems]
       .sort((a, b) => Number(b.monto_total) - Number(a.monto_total))
       .slice(0, 10);
   }, [todosLosItems]);
 
-  // Ítems pertenecientes a la subcategoría seleccionada para el Modal
   const itemsSubcategoriaModal = useMemo(() => {
     if (!subcategoriaSeleccionada) return [];
     return todosLosItems.filter(
@@ -192,7 +185,6 @@ export default function DashboardPage() {
     );
   }, [todosLosItems, subcategoriaSeleccionada]);
 
-  // Eliminar ticket
   const handleEliminarGasto = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -211,7 +203,7 @@ export default function DashboardPage() {
         const { error } = await supabaseClient.from('gastos').delete().eq('id', id);
         if (error) throw error;
 
-        Swal.fire('Eliminado', 'El ticket ha sido eliminado correctamente.', 'success');
+        Swal.fire('Eliminado', 'El ticket ha sido eliminado.', 'success');
         cargarGastos();
       } catch (err: any) {
         Swal.fire('Error', err.message || 'No se pudo eliminar el registro.', 'error');
@@ -219,10 +211,9 @@ export default function DashboardPage() {
     }
   };
 
-  // Exportación a CSV
   const exportarCSV = () => {
     if (gastosFiltrados.length === 0) {
-      Swal.fire('Atención', 'No hay datos disponibles para exportar.', 'warning');
+      Swal.fire('Atención', 'No hay datos para exportar.', 'warning');
       return;
     }
 
@@ -274,19 +265,18 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50 text-gray-800 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Cabecera Principal */}
+        {/* Cabecera */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Control de Gastos</h1>
-            <p className="text-sm text-gray-500">Análisis detallado de compras y subcategorías</p>
+            <p className="text-sm text-gray-500">Gestión de tickets y desglose de subcategorías</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Filtro Dinámico de Meses */}
             <select
               value={mesSeleccionado}
               onChange={(e) => setMesSeleccionado(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white font-medium text-gray-700"
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 font-medium text-gray-700 bg-white"
             >
               <option value="todos">Todos los meses</option>
               {mesesDisponibles.map((mes) => (
@@ -296,25 +286,23 @@ export default function DashboardPage() {
               ))}
             </select>
 
-            {/* Exportar CSV */}
             <button
               onClick={exportarCSV}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3.5 py-2 rounded-lg text-sm transition shadow-sm flex items-center gap-1.5"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3.5 py-2 rounded-lg text-sm transition shadow-sm"
             >
-              <span>📊 Exportar CSV</span>
+              📊 Exportar CSV
             </button>
 
-            {/* Escanear Ticket */}
             <button
               onClick={() => setModalUploadAbierto(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition shadow-sm flex items-center gap-2"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition shadow-sm"
             >
-              <span>✨ Escanear Ticket</span>
+              ✨ Escanear Ticket
             </button>
           </div>
         </div>
 
-        {/* Tarjetas KPI (Incluye Subcategoría TOP) */}
+        {/* Tarjetas KPI */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Total Filtrado</span>
@@ -336,17 +324,14 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* Nueva Tarjeta KPI: Subcategoría con Mayor Gasto */}
           <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm">
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              Mayor Gasto Subcat.
-            </span>
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Mayor Gasto Subcat.</span>
             {subcategoriaTop ? (
               <div
                 className="mt-1 cursor-pointer group"
                 onClick={() => setSubcategoriaSeleccionada(subcategoriaTop.subcategoria)}
               >
-                <p className="text-lg font-bold text-amber-600 truncate group-hover:underline" title={subcategoriaTop.subcategoria}>
+                <p className="text-lg font-bold text-amber-600 truncate group-hover:underline">
                   {subcategoriaTop.subcategoria}
                 </p>
                 <p className="text-xs font-semibold text-gray-500">
@@ -359,9 +344,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Sección de Gráficos */}
+        {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Gráfico 1: Categorías Generales */}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
             <h3 className="font-semibold text-gray-800 text-sm mb-4 self-start">Distribución por Categorías</h3>
             {datosPorCategoria.length > 0 ? (
@@ -394,11 +378,8 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Gráfico 2: Relevancia por Subcategorías */}
           <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
-            <h3 className="font-semibold text-gray-800 text-sm mb-4 self-start">
-              Top Subcategorías de Mayor Gasto (€)
-            </h3>
+            <h3 className="font-semibold text-gray-800 text-sm mb-4 self-start">Top Subcategorías de Mayor Gasto (€)</h3>
             {datosPorSubcategoria.length > 0 ? (
               <div className="w-full h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -428,12 +409,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Ranking Top 10 Productos Más Caros */}
+        {/* Ranking Top 10 Productos */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
           <div className="flex justify-between items-center pb-2 border-b border-gray-100">
             <div>
               <h2 className="font-bold text-gray-900 text-base">Top 10 Productos Más Caros</h2>
-              <p className="text-xs text-gray-500">Ranking de ítems individuales según su precio o monto gastado</p>
+              <p className="text-xs text-gray-500">Ranking de productos según su precio o monto acumulado</p>
             </div>
             <span className="text-xs bg-indigo-50 text-indigo-700 font-semibold px-2.5 py-1 rounded-full">
               {mesSeleccionado || 'General'}
@@ -464,7 +445,6 @@ export default function DashboardPage() {
                     <button
                       onClick={() => setSubcategoriaSeleccionada(item.subcategoria || 'Sin subcategoría')}
                       className="px-2 py-0.5 bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-gray-600 rounded-full font-medium text-xs transition"
-                      title="Ver todos los productos de esta subcategoría"
                     >
                       🏷️ {item.subcategoria || 'General'}
                     </button>
@@ -478,7 +458,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Historial Completo de Tickets */}
+        {/* Historial con opción de Editar */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-5 border-b border-gray-100 flex justify-between items-center">
             <h2 className="font-semibold text-gray-800">Historial de Compras</h2>
@@ -511,14 +491,27 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                      <span className="font-bold text-gray-900 text-lg">
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-gray-900 text-lg mr-2">
                         {Number(gasto.monto_total).toFixed(2)} €
                       </span>
 
+                      {/* Botón Editar */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setGastoAEditar(gasto);
+                        }}
+                        className="p-1.5 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold rounded-lg transition flex items-center gap-1"
+                        title="Editar ticket"
+                      >
+                        ✏️ <span className="hidden sm:inline">Editar</span>
+                      </button>
+
+                      {/* Botón Eliminar */}
                       <button
                         onClick={(e) => handleEliminarGasto(gasto.id, e)}
-                        className="p-1 text-gray-400 hover:text-red-600 rounded transition"
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg transition"
                         title="Eliminar ticket"
                       >
                         🗑️
@@ -530,7 +523,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* Desglose de Ítems */}
+                  {/* Desglose desplegable */}
                   {gastoExpandido === gasto.id && (
                     <div className="mt-3 pt-3 border-t border-gray-100 bg-gray-50 p-3 rounded-lg space-y-2">
                       <p className="text-xs font-semibold text-gray-500 uppercase">Desglose de productos:</p>
@@ -565,7 +558,7 @@ export default function DashboardPage() {
                             rel="noreferrer"
                             className="text-xs text-indigo-600 hover:underline flex items-center gap-1"
                           >
-                            <span>🔗 Ver imagen original del ticket</span>
+                            🔗 Ver imagen recortada original
                           </a>
                         </div>
                       )}
@@ -578,7 +571,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Modal Interactivo de Detalle de Subcategoría (Drill-Down) */}
+      {/* Modal Drill-Down de Subcategoría */}
       {subcategoriaSeleccionada && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-100 flex flex-col max-h-[85vh]">
@@ -587,13 +580,11 @@ export default function DashboardPage() {
                 <h3 className="text-lg font-bold text-gray-900">
                   Subcategoría: {subcategoriaSeleccionada}
                 </h3>
-                <p className="text-xs text-gray-500">
-                  Total de ítems comprados en el período
-                </p>
+                <p className="text-xs text-gray-500">Ítems comprados en el período</p>
               </div>
               <button
                 onClick={() => setSubcategoriaSeleccionada(null)}
-                className="text-gray-400 hover:text-gray-600 font-bold p-1 rounded-lg"
+                className="text-gray-400 hover:text-gray-600 font-bold p-1"
               >
                 ✕
               </button>
@@ -637,6 +628,17 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Edición de Tickets */}
+      <EditTicketModal
+        isOpen={!!gastoAEditar}
+        gasto={gastoAEditar}
+        onClose={() => setGastoAEditar(null)}
+        onSuccess={() => {
+          setGastoAEditar(null);
+          cargarGastos();
+        }}
+      />
 
       {/* Modal de Escaneo con Gemini */}
       <UploadModal

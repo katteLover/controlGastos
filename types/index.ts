@@ -16,7 +16,7 @@ export interface ItemGasto {
   cantidad: number;
   precio_unitario: number;
   monto_total: number;
-  subcategoria: string;
+  subcategoria?: string; // <--- Cambiado a opcional (?) para evitar fallos si viene vacía o nula
 }
 
 export interface Gasto {
@@ -24,9 +24,9 @@ export interface Gasto {
   created_at?: string;
   fecha: string;
   comercio: string;
-  categoria_general: string;
+  categoria_general?: string;
   monto_total: number;
-  moneda: string;
+  moneda?: string;
   url_comprobante?: string;
   user_id?: string;
   items_gasto?: ItemGasto[];
