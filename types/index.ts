@@ -3,7 +3,7 @@ export interface Profile {
   email?: string;
   full_name?: string;
   nombre?: string;
-  role?: string;
+  role?: 'user' | 'admin'; // Tipo estricto requerido por app/admin/page.tsx
   is_admin?: boolean;
   created_at?: string;
   updated_at?: string;
