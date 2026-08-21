@@ -1,69 +1,118 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenAI, Type } from '@google/genai';
 
-const apiKey = process.env.GEMINI_API_KEY;
+// Inicializar cliente SDK de Google GenAI
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
 
-if (!apiKey) {
-  throw new Error('Falta la variable de entorno GEMINI_API_KEY en el servidor.');
-}
+// Definición del esquema JSON para la respuesta estructurada
+const ticketSchema = {
+  type: Type.OBJECT,
+  properties: {
+    establecimiento: {
+      type: Type.STRING,
+      description: 'Nombre del supermercado o tienda (ej: Mercadona, Carrefour, Lidl, Dia)',
+    },
+    fecha: {
+      type: Type.STRING,
+      description: 'Fecha de la compra en formato ISO (YYYY-MM-DD)',
+    },
+    total: {
+      type: Type.NUMBER,
+      description: 'Monto total pagado expresado en euros (€)',
+    },
+    articulos: {
+      type: Type.ARRAY,
+      description: 'Lista detallada de los artículos o productos comprados',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          nombre: {
+            type: Type.STRING,
+            description: 'Nombre o descripción del producto',
+          },
+          precio: {
+            type: Type.NUMBER,
+            description: 'Precio final del producto en euros (€)',
+          },
+          cantidad: {
+            type: Type.NUMBER,
+            description: 'Cantidad comprada (por defecto 1)',
+          },
+          categoria: {
+            type: Type.STRING,
+            description: 'Categoría estimada (Alimentación, Bebidas, Limpieza, Frescos, Varios, etc.)',
+          },
+        },
+        required: ['nombre', 'precio'],
+      },
+    },
+  },
+  required: ['establecimiento', 'fecha', 'total', 'articulos'],
+};
 
-const genAI = new GoogleGenerativeAI(apiKey);
+export async function POST(req: NextRequest) {
+  try {
+    const { image } = await req.json();
 
-/**
- * Envía una imagen codificada en Base64 al modelo Gemini para extraer
- * de manera estructurada los campos clave del ticket de compra.
- */
-export async function analyzeTicket(base64Data: string, mimeType: string) {
-  // Inicializamos el modelo optimizado para visión y estructuración JSON rápida
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
-  });
-
-  const prompt = `
-    Analiza detalladamente la imagen de este ticket de compra, factura o recibo suministrado.
-    Tu tarea es extraer de forma sumamente precisa la información financiera y estructurarla en un objeto JSON estricto.
-    
-    Las categorías permitidas para los productos individuales son UNICAMENTE una de las siguientes 10 opciones:
-    "Alimentación", "Transporte", "Salud", "Hogar", "Entretenimiento", "Ropa", "Tecnología", "Educación", "Viajes", "Otros".
-    Clasifica de manera lógica cada producto según el nombre que aparezca en el ticket.
-
-    Estructura requerida del JSON de respuesta:
-    {
-      "establecimiento": "Nombre comercial del comercio o empresa emisora",
-      "fecha": "Fecha de la transacción en formato YYYY-MM-DD (si no se encuentra, pon la fecha actual)",
-      "total": 0.00 (Número flotante o decimal con el importe total neto pagado),
-      "moneda": "Código ISO de 3 letras de la divisa, ej: EUR, USD, COP, MXN (por defecto EUR)",
-      "productos": [
-        {
-          "nombre": "Descripción limpia del artículo o producto comprado",
-          "categoria": "Una de las 10 categorías permitidas mencionadas arriba",
-          "precio_unitario": 0.00 (Precio por unidad del producto),
-          "cantidad": 1 (Número entero de unidades compradas),
-          "precio_total": 0.00 (Importe total del item: precio_unitario * cantidad)
-        }
-      ]
+    if (!image) {
+      return NextResponse.json(
+        { error: 'No se ha proporcionado ninguna imagen.' },
+        { status: 400 }
+      );
     }
 
-    Reglas críticas de extracción:
-    - No inventes información. Si no detectas productos, deja el array vacío.
-    - Asegúrate de que la suma de "precio_total" de los productos concuerde razonablemente con el campo "total" general del ticket.
-    - Devuelve exclusivamente el string JSON plano, sin bloques de código markdown (\`\`\`).
-  `;
+    // Extraer base64 y tipo MIME de la imagen cargada
+    const matches = image.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
+    if (!matches) {
+      return NextResponse.json(
+        { error: 'Formato de imagen en base64 no válido.' },
+        { status: 400 }
+      );
+    }
 
-  // Preparamos el payload adjuntando la información binaria de la imagen
-  const imagePart = {
-    inlineData: {
-      data: base64Data,
-      mimeType: mimeType
-    },
-  };
+    const mimeType = matches[1];
+    const base64Data = matches[2];
 
-  const result = await model.generateContent([prompt, imagePart]);
-  const response = await result.response;
-  const text = response.text();
+    // Llamada a la API usando @google/genai y el modelo gemini-3.1-flash-lite
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-flash-lite',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType,
+              },
+            },
+            {
+              text: 'Analiza este ticket de compra y extrae la información requerida en formato JSON siguiendo exactamente el esquema indicado. Todos los valores monetarios deben estar expresados en Euros (€).',
+            },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: ticketSchema,
+      },
+    });
 
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error("Gemini no retornó un esquema JSON parseable: " + text);
+    const textResult = response.text;
+    if (!textResult) {
+      throw new Error('No se recibió una respuesta del modelo.');
+    }
+
+    const parsedData = JSON.parse(textResult);
+
+    return NextResponse.json(parsedData, { status: 200 });
+  } catch (error: any) {
+    console.error('Error procesando el ticket con Gemini:', error);
+    return NextResponse.json(
+      { error: error.message || 'Error interno al procesar el ticket con IA.' },
+      { status: 500 }
+    );
   }
 }

@@ -79,3 +79,52 @@ export function formatDate(dateString: string): string {
   const date = new Date(dateString);
   return new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium' }).format(date);
 }
+// utils/exportCSV.ts
+
+export interface Gasto {
+  id: number;
+  fecha: string;
+  descripcion: string;
+  categoria: string;
+  monto: number;
+  urlOriginal?: string;
+}
+
+export const exportarGastosACSV = (gastos: Gasto[], nombreArchivo?: string) => {
+  if (!gastos || gastos.length === 0) return false;
+
+  // 1. Definir los encabezados de las columnas
+  const encabezados = ['ID', 'Fecha', 'Descripción', 'Categoría', 'Monto (€)'];
+
+  // 2. Formatear y escapar cada fila
+  const filas = gastos.map(gasto => [
+    gasto.id,
+    gasto.fecha,
+    `"${gasto.descripcion.replace(/"/g, '""')}"`, // Escapar comillas dobles internas
+    `"${gasto.categoria.replace(/"/g, '""')}"`,
+    gasto.monto.toFixed(2).replace('.', ',')     // Formato decimal con coma para Excel en español
+  ]);
+
+  // 3. Unir usando punto y coma (;) como separador (estándar para Excel en español)
+  const contenidoCSV = [
+    encabezados.join(';'),
+    ...filas.map(fila => fila.join(';'))
+  ].join('\n');
+
+  // 4. Agregar BOM (\uFEFF) para forzar codificación UTF-8 en Excel (evita errores con tildes y ñ)
+  const blob = new Blob(['\uFEFF' + contenidoCSV], { type: 'text/csv;charset=utf-8;' });
+
+  // 5. Crear objeto URL y disparar la descarga
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.setAttribute('download', nombreArchivo || `gastos_${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(enlace);
+  enlace.click();
+
+  // 6. Limpieza de memoria en el navegador
+  document.body.removeChild(enlace);
+  URL.revokeObjectURL(url);
+
+  return true;
+};

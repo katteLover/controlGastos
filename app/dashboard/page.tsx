@@ -1,493 +1,502 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { Gasto, ItemGasto, MetricaSubcategoria, ProductoRanking } from '@/types';
+import Swal from 'sweetalert2';
+import 'sweetalert2/dist/sweetalert2.min.css';
 
-interface Item {
-  nombre: string;
-  cantidad: number;
-  precio: number;
-}
-
-interface Compra {
-  id: string;
-  fecha: string;
-  establecimiento: string;
-  categoria: string;
-  total: number;
-  items: Item[];
-  ticket_url?: string;
-  user_id?: string;
-}
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Supermercado: '#10B981',
-  Restaurante: '#F59E0B',
-  Tecnología: '#3B82F6',
-  Ropa: '#EC4899',
-  Transporte: '#8B5CF6',
-  Entretenimiento: '#EF4444',
-  Hogar: '#06B6D4',
-  Otros: '#64748B',
-};
+// Datos de demostración en EUROS (€)
+const MOCK_GASTOS: Gasto[] = [
+  {
+    id: '1',
+    fecha: '2026-08-05',
+    comercio: 'Mercadona',
+    categoria_general: 'Supermercado',
+    monto_total: 84.50,
+    moneda: 'EUR',
+    url_comprobante: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+    items_gasto: [
+      { id: '101', descripcion: 'Solomillo Ibérico de Cerdo', cantidad: 1, precio_unitario: 24.00, monto_total: 24.00, subcategoria: 'Carnicería' },
+      { id: '102', descripcion: 'Aceite de Oliva Virgen Extra 1L', cantidad: 2, precio_unitario: 9.50, monto_total: 19.00, subcategoria: 'Abarrotes y Aceites' },
+      { id: '103', descripcion: 'Queso Parmesano Reggiano 250g', cantidad: 1, precio_unitario: 18.50, monto_total: 18.50, subcategoria: 'Lácteos y Quesos' },
+      { id: '104', descripcion: 'Detergente Líquido Ropa 40L', cantidad: 1, precio_unitario: 12.00, monto_total: 12.00, subcategoria: 'Limpieza y Hogar' },
+      { id: '105', descripcion: 'Pack Leche Entera 6L', cantidad: 1, precio_unitario: 7.00, monto_total: 7.00, subcategoria: 'Lácteos y Quesos' }
+    ]
+  },
+  {
+    id: '2',
+    fecha: '2026-08-12',
+    comercio: 'MediaMarkt',
+    categoria_general: 'Tecnología',
+    monto_total: 189.99,
+    moneda: 'EUR',
+    url_comprobante: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+    items_gasto: [
+      { id: '201', descripcion: 'Auriculares Inalámbricos Noise Cancelling', cantidad: 1, precio_unitario: 129.99, monto_total: 129.99, subcategoria: 'Audio y Sonido' },
+      { id: '202', descripcion: 'Tarjeta MicroSD 256GB', cantidad: 1, precio_unitario: 35.00, monto_total: 35.00, subcategoria: 'Accesorios Tech' },
+      { id: '203', descripcion: 'Cable USB-C Carga Rápida 2m', cantidad: 1, precio_unitario: 25.00, monto_total: 25.00, subcategoria: 'Accesorios Tech' }
+    ]
+  },
+  {
+    id: '3',
+    fecha: '2026-08-18',
+    comercio: 'Carrefour',
+    categoria_general: 'Supermercado',
+    monto_total: 62.30,
+    moneda: 'EUR',
+    url_comprobante: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+    items_gasto: [
+      { id: '301', descripcion: 'Salmón Fresco Fileteado 500g', cantidad: 1, precio_unitario: 22.50, monto_total: 22.50, subcategoria: 'Pescadería' },
+      { id: '302', descripcion: 'Vino Tinto Reserva Rioja', cantidad: 2, precio_unitario: 11.00, monto_total: 22.00, subcategoria: 'Bebidas y Licores' },
+      { id: '303', descripcion: 'Pastillas Lavavajillas Todo en 1', cantidad: 1, precio_unitario: 10.80, monto_total: 10.80, subcategoria: 'Limpieza y Hogar' },
+      { id: '304', descripcion: 'Pan de Masa Madre', cantidad: 2, precio_unitario: 3.50, monto_total: 7.00, subcategoria: 'Panadería' }
+    ]
+  },
+  {
+    id: '4',
+    fecha: '2026-07-22',
+    comercio: 'Decathlon',
+    categoria_general: 'Deportes',
+    monto_total: 115.00,
+    moneda: 'EUR',
+    items_gasto: [
+      { id: '401', descripcion: 'Zapatillas Running Trail', cantidad: 1, precio_unitario: 85.00, monto_total: 85.00, subcategoria: 'Calzado Deportivo' },
+      { id: '402', descripcion: 'Camiseta Técnica Transpirable', cantidad: 2, precio_unitario: 15.00, monto_total: 30.00, subcategoria: 'Ropa Deportiva' }
+    ]
+  }
+];
 
 export default function DashboardPage() {
-  // --- Estados de Datos ---
-  const [compras, setCompras] = useState<Compra[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isScanning, setIsScanning] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
+  const [gastos, setGastos] = useState<Gasto[]>(MOCK_GASTOS);
+  const [mesSeleccionado, setMesSeleccionado] = useState<string>('2026-08'); // Formato YYYY-MM
+  const [gastoSeleccionado, setGastoSeleccionado] = useState<Gasto | null>(null);
+  
+  const overlayRef = useRef<HTMLDivElement>(null);
 
-  // --- Estados de Filtros y Búsqueda ---
-  const [searchTerm, setSearchTerm] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // Configuración de Interceptor Global de Alerts
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.alert = (msg: string) => {
+        Swal.fire({
+          title: 'Control de Gastos',
+          text: msg,
+          icon: 'info',
+          confirmButtonColor: '#2563eb',
+          confirmButtonText: 'Aceptar'
+        });
+      };
 
-  // --- Estados Edición/Eliminación ---
-  const [selectedCompra, setSelectedCompra] = useState<Compra | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-
-  const formatEuro = (value: number) => {
-    return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(value);
-  };
-
-  const fetchCompras = useCallback(async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('compras')
-        .select('*')
-        .order('fecha', { ascending: false });
-
-      if (error) throw error;
-      setCompras(data || []);
-    } catch (error: any) {
-      alert(`Error al cargar el historial: ${error.message}`);
-    } finally {
-      setLoading(false);
+      window.confirm = async (msg: string) => {
+        const res = await Swal.fire({
+          title: '¿Confirmar Acción?',
+          text: msg,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#dc2626',
+          cancelButtonColor: '#4b5563',
+          confirmButtonText: 'Sí, continuar',
+          cancelButtonText: 'Cancelar'
+        });
+        return res.isConfirmed;
+      };
     }
   }, []);
 
-  useEffect(() => {
-    fetchCompras();
-    setIsMounted(true);
-  }, [fetchCompras]);
-
-  // --- Lógica del Filtro Reactivo Dinámico ---
-  const filteredCompras = useMemo(() => {
-    return compras.filter((compra) => {
-      // 1. Filtro por nombre de establecimiento (IgnoreCase)
-      const matchesSearch = compra.establecimiento
-        ?.toLowerCase()
-        .includes(searchTerm.toLowerCase());
-
-      // 2. Filtro por Rango de Fechas (Comparación directa de cadenas YYYY-MM-DD segura)
-      const matchesStart = startDate ? compra.fecha >= startDate : true;
-      const matchesEnd = endDate ? compra.fecha <= endDate : true;
-
-      return matchesSearch && matchesStart && matchesEnd;
+  // Opciones dinámicas para el filtro Mes-Año
+  const opcionesMeses = useMemo(() => {
+    const mesesSet = new Set<string>();
+    // Incluir mes actual por defecto
+    const hoy = new Date().toISOString().slice(0, 7);
+    mesesSet.add(hoy);
+    gastos.forEach(g => {
+      if (g.fecha) mesesSet.add(g.fecha.slice(0, 7));
     });
-  }, [compras, searchTerm, startDate, endDate]);
+    return Array.from(mesesSet).sort().reverse();
+  }, [gastos]);
 
-  // --- Recálculo de Métricas basadas estrictamente en los datos filtrados ---
-  const totalGastado = filteredCompras.reduce((acc, curr) => acc + Number(curr.total), 0);
-  const promedioGasto = filteredCompras.length > 0 ? totalGastado / filteredCompras.length : 0;
+  // Filtrado de gastos por el mes seleccionado
+  const gastosDelMes = useMemo(() => {
+    return gastos.filter(g => g.fecha.startsWith(mesSeleccionado));
+  }, [gastos, mesSeleccionado]);
 
-  const chartData = useMemo(() => {
-    const agrupado: Record<string, number> = {};
-    filteredCompras.forEach((c) => {
-      agrupado[c.categoria] = (agrupado[c.categoria] || 0) + Number(c.total);
-    });
-    
-    return Object.keys(agrupado).map((cat) => ({
-      name: cat,
-      value: parseFloat(agrupado[cat].toFixed(2)),
-    }));
-  }, [filteredCompras]);
-
-  const resetFilters = () => {
-    setSearchTerm('');
-    setStartDate('');
-    setEndDate('');
-  };
-
-  // --- Operaciones CRUD e IA ---
-  const handleFileScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setIsScanning(true);
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) throw new Error('No se encontró una sesión activa de usuario.');
-
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${session.user.id}/${Date.now()}.${fileExt}`;
-      const filePath = `comprobantes/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage.from('tickets').upload(filePath, file);
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage.from('tickets').getPublicUrl(filePath);
-
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('ticketUrl', publicUrl);
-
-      const response = await fetch('/api/procesar', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-        body: formData
-      });
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Error al procesar el ticket con la IA.');
-
-      alert(`¡Escaneo exitoso! Registrado en ${result.compra.establecimiento}.`);
-      fetchCompras();
-    } catch (error: any) {
-      alert(`Error en el escaneo: ${error.message}`);
-    } finally {
-      setIsScanning(false);
-      if (e.target) e.target.value = '';
-    }
-  };
-
-  const handleEditItemChange = (index: number, field: keyof Item, value: any) => {
-    if (!selectedCompra || !selectedCompra.items) return;
-    const updatedItems = [...selectedCompra.items];
-    updatedItems[index] = { ...updatedItems[index], [field]: value };
-
-    const nuevoTotal = updatedItems.reduce((acc, item) => {
-      return acc + ((Number(item.cantidad) || 0) * (Number(item.precio) || 0));
-    }, 0);
-
-    setSelectedCompra({
-      ...selectedCompra,
-      items: updatedItems,
-      total: parseFloat(nuevoTotal.toFixed(2))
-    });
-  };
-
-  const handleUpdateExisting = async () => {
-    if (!selectedCompra) return;
-    try {
-      const { error } = await supabase
-        .from('compras')
-        .update({
-          establecimiento: selectedCompra.establecimiento,
-          fecha: selectedCompra.fecha,
-          categoria: selectedCompra.categoria,
-          total: selectedCompra.total,
-          items: selectedCompra.items
-        })
-        .eq('id', selectedCompra.id);
-
-      if (error) throw error;
-      setShowEditModal(false);
-      fetchCompras();
-      alert('Gasto modificado correctamente.');
-    } catch (error: any) {
-      alert(`Error al actualizar: ${error.message}`);
-    }
-  };
-
-  const handleDeleteExisting = async (id: string, ticketUrl?: string) => {
-    if (!confirm('¿Estás seguro de eliminar este gasto de forma permanente?')) return;
-    try {
-      const { error: dbError } = await supabase.from('compras').delete().eq('id', id);
-      if (dbError) throw dbError;
-
-      if (ticketUrl) {
-        const match = ticketUrl.match(/comprobantes\/.+/);
-        if (match) await supabase.storage.from('tickets').remove([match[0]]);
+  // Todos los ítems individuales del mes seleccionado
+  const itemsDelMes = useMemo(() => {
+    const lista: ProductoRanking[] = [];
+    gastosDelMes.forEach(gasto => {
+      if (gasto.items_gasto) {
+        gasto.items_gasto.forEach(item => {
+          lista.push({
+            id: item.id || `${gasto.id}-${item.descripcion}`,
+            descripcion: item.descripcion,
+            subcategoria: item.subcategoria || 'Sin Subcategoría',
+            monto_total: item.monto_total,
+            precio_unitario: item.precio_unitario,
+            cantidad: item.cantidad,
+            fecha: gasto.fecha,
+            comercio: gasto.comercio
+          });
+        });
       }
+    });
+    return lista;
+  }, [gastosDelMes]);
 
-      setShowEditModal(false);
-      fetchCompras();
-      alert('Gasto eliminado.');
-    } catch (error: any) {
-      alert(`Error al eliminar: ${error.message}`);
+  // Total gastado en el mes
+  const totalMontoMes = useMemo(() => {
+    return gastosDelMes.reduce((acc, curr) => acc + curr.monto_total, 0);
+  }, [gastosDelMes]);
+
+  // Análisis por Subcategorías (Métricas y Porcentajes)
+  const metricasSubcategorias = useMemo(() => {
+    const agrupado: { [key: string]: { monto: number; items: number } } = {};
+
+    itemsDelMes.forEach(item => {
+      const sub = item.subcategoria.trim();
+      if (!agrupado[sub]) {
+        agrupado[sub] = { monto: 0, items: 0 };
+      }
+      agrupado[sub].monto += item.monto_total;
+      agrupado[sub].items += 1;
+    });
+
+    const resultado: MetricaSubcategoria[] = Object.keys(agrupado).map(sub => ({
+      subcategoria: sub,
+      montoTotal: agrupado[sub].monto,
+      porcentaje: totalMontoMes > 0 ? (agrupado[sub].monto / totalMontoMes) * 100 : 0,
+      cantidadItems: agrupado[sub].items
+    }));
+
+    return resultado.sort((a, b) => b.montoTotal - a.montoTotal);
+  }, [itemsDelMes, totalMontoMes]);
+
+  // Subcategoría principal en la que más se gastó
+  const subcategoriaLider = useMemo(() => {
+    return metricasSubcategorias.length > 0 ? metricasSubcategorias[0] : null;
+  }, [metricasSubcategorias]);
+
+  // TOP 10 Productos más caros del mes
+  const top10Productos = useMemo(() => {
+    return [...itemsDelMes]
+      .sort((a, b) => b.monto_total - a.monto_total)
+      .slice(0, 10);
+  }, [itemsDelMes]);
+
+  // Eliminar un ticket con confirmación
+  const handleEliminarGasto = async (id: string) => {
+    const seguro = await window.confirm("¿Deseas eliminar este comprobante y todos sus productos?");
+    if (seguro) {
+      setGastos(prev => prev.filter(g => g.id !== id));
+      alert("Comprobante eliminado con éxito.");
     }
+  };
+
+  // Exportar reporte completo a CSV
+  const exportarCSV = () => {
+    if (itemsDelMes.length === 0) {
+      alert("No hay productos registrados en el mes seleccionado para exportar.");
+      return;
+    }
+
+    const encabezados = ["Fecha", "Comercio", "Producto / Ítem", "Subcategoría", "Cantidad", "Precio Unitario (€)", "Monto Total (€)"];
+    
+    const filas = itemsDelMes.map(item => [
+      item.fecha,
+      `"${item.comercio.replace(/"/g, '""')}"`,
+      `"${item.descripcion.replace(/"/g, '""')}"`,
+      `"${item.subcategoria.replace(/"/g, '""')}"`,
+      item.cantidad,
+      item.precio_unitario.toFixed(2).replace('.', ','),
+      item.monto_total.toFixed(2).replace('.', ',')
+    ]);
+
+    const contenidoCSV = [encabezados.join(";"), ...filas.map(f => f.join(";"))].join("\n");
+    const blob = new Blob(["\uFEFF" + contenidoCSV], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = `reporte_gastos_${mesSeleccionado}.csv`;
+    document.body.appendChild(enlace);
+    enlace.click();
+    document.body.removeChild(enlace);
+    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 font-sans antialiased text-slate-900">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans text-gray-900">
+      <div className="max-w-7xl mx-auto space-y-8">
         
-        {/* Encabezado */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b pb-6">
+        {/* CABECERA Y SELECTOR DE MES */}
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div>
-            <h1 className="text-2xl font-black tracking-tight text-slate-900 md:text-3xl">Control de Gastos Inteligente</h1>
-            <p className="text-sm text-slate-500 mt-1">Filtrado en tiempo real impulsado por Gemini 3.1 Flash Lite en el backend.</p>
+            <h1 className="text-2xl font-bold text-gray-900">Dashboard de Gastos</h1>
+            <p className="text-sm text-gray-500">Análisis detallado de comprobantes, ítems y subcategorías</p>
           </div>
 
-          <div>
-            <label className={`flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-200 hover:bg-blue-700 transition cursor-pointer select-none ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}>
-              <span>{isScanning ? '🔄 Leyendo ticket con IA...' : '📷 Escanear Nuevo Ticket'}</span>
-              <input type="file" accept="image/*,application/pdf" capture="environment" onChange={handleFileScan} className="hidden" disabled={isScanning} />
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <label htmlFor="mes-select" className="text-sm font-semibold text-gray-700 whitespace-nowrap">
+              Período:
             </label>
+            <select
+              id="mes-select"
+              value={mesSeleccionado}
+              onChange={(e) => setMesSeleccionado(e.target.value)}
+              className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-medium"
+            >
+              {opcionesMeses.map(mes => {
+                const [year, month] = mes.split('-');
+                const fechaObj = new Date(parseInt(year), parseInt(month) - 1);
+                const nombreMes = fechaObj.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+                return (
+                  <option key={mes} value={mes}>
+                    {nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1)}
+                  </option>
+                );
+              })}
+            </select>
+
+            <button
+              onClick={exportarCSV}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2.5 rounded-lg text-sm transition shadow-sm flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a12 12 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Exportar CSV
+            </button>
           </div>
+        </header>
+
+        {/* TARJETAS DE MÉTRICAS KPI */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          {/* KPI 1: Gasto Total del Mes */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+            <span className="text-sm font-semibold text-gray-500">Total Gastado ({mesSeleccionado})</span>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-gray-900">{totalMontoMes.toFixed(2)} €</span>
+              <span className="text-xs text-gray-400">({gastosDelMes.length} tickets)</span>
+            </div>
+          </div>
+
+          {/* KPI 2: Subcategoría con mayor gasto */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col justify-between">
+            <span className="text-sm font-semibold text-blue-800">Subcategoría N° 1 en Gasto</span>
+            <div className="mt-2">
+              {subcategoriaLider ? (
+                <>
+                  <p className="text-2xl font-bold text-blue-950 truncate">{subcategoriaLider.subcategoria}</p>
+                  <p className="text-sm text-blue-700 font-medium mt-1">
+                    {subcategoriaLider.montoTotal.toFixed(2)} € <span className="text-xs font-normal">({subcategoriaLider.porcentaje.toFixed(1)}% del total)</span>
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-400 mt-2">Sin registro de datos</p>
+              )}
+            </div>
+          </div>
+
+          {/* KPI 3: Ítem más caro de la compra */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
+            <span className="text-sm font-semibold text-gray-500">Producto Individual Más Caro</span>
+            <div className="mt-2">
+              {top10Productos.length > 0 ? (
+                <>
+                  <p className="text-lg font-bold text-gray-900 truncate">{top10Productos[0].descripcion}</p>
+                  <p className="text-sm text-red-600 font-semibold mt-0.5">
+                    {top10Productos[0].monto_total.toFixed(2)} € <span className="text-xs text-gray-500">({top10Productos[0].subcategoria})</span>
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-400 mt-2">Sin datos en el mes</p>
+              )}
+            </div>
+          </div>
+
         </div>
 
-        {/* CONTENEDOR DE MÉTRICAS Y GRÁFICO (SE ACTUALIZAN CON LOS FILTROS) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="flex flex-col justify-between gap-4 lg:col-span-1">
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Gastado (Filtrado)</span>
-              <h3 className="text-3xl font-black text-slate-900 mt-1">{formatEuro(totalGastado)}</h3>
-            </div>
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Tickets Encontrados</span>
-              <h3 className="text-3xl font-black text-slate-900 mt-1">{filteredCompras.length}</h3>
-            </div>
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Gasto Promedio</span>
-              <h3 className="text-3xl font-black text-slate-900 mt-1">{formatEuro(promedioGasto)}</h3>
-            </div>
-          </div>
+        {/* SECCIÓN VISUAL: TOP 10 PRODUCTOS Y DESGLOSE POR SUBCATEGORÍA */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          
+          {/* RANKING TOP 10 PRODUCTOS MÁS CAROS */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <span>🔥</span> Top 10 Productos Más Caros del Mes
+            </h2>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm lg:col-span-2 flex flex-col justify-between min-h-[260px]">
-            <div className="border-b pb-2 mb-2">
-              <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Distribución Segmentada</h3>
-            </div>
-            <div className="flex-1 w-full h-[200px] flex items-center justify-center">
-              {loading ? (
-                <p className="text-xs font-medium text-slate-400">Cargando...</p>
-              ) : filteredCompras.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">No hay datos en el rango seleccionado.</p>
-              ) : isMounted ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={chartData} cx="40%" cy="50%" innerRadius={55} outerRadius={75} paddingAngle={3} dataKey="value">
-                      {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.name] || '#64748B'} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value: number) => formatEuro(value)} />
-                    <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px', paddingLeft: '10px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        {/* BLOQUE DE FILTROS AVANZADOS */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Buscar por Comercio</label>
-            <input 
-              type="text" 
-              placeholder="Ej. Mercadona, Amazon..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Desde (Fecha)</label>
-            <input 
-              type="date" 
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-          </div>
-          <div className="flex gap-2 items-center">
-            <div className="flex-1">
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hasta (Fecha)</label>
-              <input 
-                type="date" 
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-            </div>
-            {(searchTerm || startDate || endDate) && (
-              <button 
-                type="button" 
-                onClick={resetFilters} 
-                className="px-3 py-2 bg-slate-100 text-slate-600 font-medium text-xs rounded-xl hover:bg-slate-200 transition mt-5 h-[38px]"
-                title="Limpiar filtros"
-              >
-                ✕ Limpiar
-              </button>
+            {top10Productos.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-8">No hay productos desglosados este mes.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b text-xs text-gray-400 uppercase">
+                      <th className="py-2">#</th>
+                      <th className="py-2">Producto</th>
+                      <th className="py-2">Subcategoría</th>
+                      <th className="py-2 text-right">Monto (€)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {top10Productos.map((prod, index) => (
+                      <tr key={prod.id} className="hover:bg-gray-50 transition">
+                        <td className="py-2.5 font-bold text-gray-400">{index + 1}</td>
+                        <td className="py-2.5 font-medium text-gray-800 max-w-[180px] truncate" title={prod.descripcion}>
+                          {prod.descripcion}
+                          <span className="block text-[11px] text-gray-400 font-normal">{prod.comercio} ({prod.fecha})</span>
+                        </td>
+                        <td className="py-2.5">
+                          <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">
+                            {prod.subcategoria}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right font-bold text-gray-900">
+                          {prod.monto_total.toFixed(2)} €
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
-        </div>
 
-        {/* Tabla / Historial Principal */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
-            <h2 className="font-bold text-slate-800 text-base">Historial de Transacciones</h2>
-            {filteredCompras.length !== compras.length && (
-              <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-semibold">
-                Mostrando {filteredCompras.length} de {compras.length} registros
-              </span>
+          {/* DESGLOSE POR SUBCATEGORÍA (GRÁFICO DE BARRAS / PROGRESO) */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <span>📊</span> Gastos por Subcategoría
+            </h2>
+
+            {metricasSubcategorias.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-8">No hay subcategorías registradas.</p>
+            ) : (
+              <div className="space-y-4 max-h-[380px] overflow-y-auto pr-2">
+                {metricasSubcategorias.map(metric => (
+                  <div key={metric.subcategoria} className="space-y-1">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-semibold text-gray-700">{metric.subcategoria}</span>
+                      <span className="font-bold text-gray-900">
+                        {metric.montoTotal.toFixed(2)} € <span className="text-xs text-gray-400 font-normal">({metric.porcentaje.toFixed(1)}%)</span>
+                      </span>
+                    </div>
+                    {/* Barra de progreso de porcentaje */}
+                    <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" 
+                        style={{ width: `${Math.min(metric.porcentaje, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
-          {loading ? (
-            <div className="p-12 text-center text-sm text-slate-400 font-medium">Cargando transacciones de la base de datos...</div>
-          ) : filteredCompras.length === 0 ? (
-            <div className="p-12 text-center text-sm text-slate-400 italic">No se encontraron transacciones que coincidan con los filtros aplicados.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider border-b">
+        </div>
+
+        {/* TABLA PRINCIPAL DE COMPROBANTES */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Comprobantes de {mesSeleccionado}</h2>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b text-gray-600 font-semibold">
+                  <th className="p-3">Fecha</th>
+                  <th className="p-3">Comercio</th>
+                  <th className="p-3">Categoría General</th>
+                  <th className="p-3">Total (€)</th>
+                  <th className="p-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {gastosDelMes.map(gasto => (
+                  <tr key={gasto.id} className="hover:bg-gray-50 transition">
+                    <td className="p-3">{gasto.fecha}</td>
+                    <td className="p-3 font-semibold text-gray-800">{gasto.comercio}</td>
+                    <td className="p-3">
+                      <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-md text-xs font-medium">
+                        {gasto.categoria_general}
+                      </span>
+                    </td>
+                    <td className="p-3 font-bold text-gray-900">{gasto.monto_total.toFixed(2)} €</td>
+                    <td className="p-3">
+                      <button 
+                        onClick={() => setGastoSeleccionado(gasto)} 
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium mr-2 transition"
+                      >
+                        Ver Ítems ({gasto.items_gasto?.length || 0})
+                      </button>
+                      <button 
+                        onClick={() => handleEliminarGasto(gasto.id)} 
+                        className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-medium transition"
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      {/* MODAL DETALLE DEL COMPROBANTE CON PRODUCTOS Y SUBCATEGORÍAS */}
+      {gastoSeleccionado && (
+        <div 
+          ref={overlayRef} 
+          onClick={(e) => { if (e.target === overlayRef.current) setGastoSeleccionado(null); }}
+          className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center p-4"
+        >
+          <div className="bg-white p-6 rounded-2xl w-full max-w-3xl relative shadow-2xl max-h-[90vh] overflow-y-auto">
+            <button 
+              onClick={() => setGastoSeleccionado(null)} 
+              className="absolute top-4 right-4 text-2xl font-bold text-gray-400 hover:text-gray-600"
+            >
+              &times;
+            </button>
+
+            <h2 className="text-xl font-bold mb-2">Detalle de Compra - {gastoSeleccionado.comercio}</h2>
+            <p className="text-sm text-gray-500 mb-4">Fecha: {gastoSeleccionado.fecha} | Total Ticket: <strong>{gastoSeleccionado.monto_total.toFixed(2)} €</strong></p>
+
+            <h3 className="font-bold text-sm text-gray-700 mb-2">Desglose de Ítems y Subcategorías:</h3>
+            <div className="border rounded-xl overflow-hidden mb-6">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
                   <tr>
-                    <th className="p-4">Fecha</th>
-                    <th className="p-4">Establecimiento</th>
-                    <th className="p-4">Categoría</th>
-                    <th className="p-4 text-center">Ticket / Acción</th>
-                    <th className="p-4 text-right">Importe</th>
+                    <th className="p-3">Producto</th>
+                    <th className="p-3">Subcategoría</th>
+                    <th className="p-3 text-center">Cant.</th>
+                    <th className="p-3 text-right">Precio U. (€)</th>
+                    <th className="p-3 text-right">Total (€)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {filteredCompras.map((compra) => (
-                    <tr key={compra.id} className="hover:bg-slate-50/50 transition">
-                      <td className="p-4 text-slate-500 whitespace-nowrap">{compra.fecha}</td>
-                      <td className="p-4 font-semibold text-slate-900">{compra.establecimiento}</td>
-                      <td className="p-4">
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: `${CATEGORY_COLORS[compra.categoria]}15`, color: CATEGORY_COLORS[compra.categoria] }}>
-                          {compra.categoria}
+                <tbody className="divide-y">
+                  {gastoSeleccionado.items_gasto?.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="p-3 font-medium text-gray-800">{item.descripcion}</td>
+                      <td className="p-3">
+                        <span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-xs font-medium">
+                          {item.subcategoria}
                         </span>
                       </td>
-                      <td className="p-4">
-                        <div className="flex items-center justify-center gap-2">
-                          {compra.ticket_url && (
-                            <a href={compra.ticket_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md hover:bg-indigo-100 transition">
-                              Ver original ↗
-                            </a>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedCompra(JSON.parse(JSON.stringify(compra)));
-                              setShowEditModal(true);
-                            }}
-                            className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-md hover:bg-slate-200 transition"
-                          >
-                            ✏️ Editar
-                          </button>
-                        </div>
-                      </td>
-                      <td className="p-4 text-right font-bold text-slate-900 whitespace-nowrap">{formatEuro(Number(compra.total))}</td>
+                      <td className="p-3 text-center">{item.cantidad}</td>
+                      <td className="p-3 text-right">{item.precio_unitario.toFixed(2)} €</td>
+                      <td className="p-3 text-right font-bold text-gray-900">{item.monto_total.toFixed(2)} €</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
 
-      </div>
-
-      {/* MODAL LADO A LADO PARA EDITAR / ELIMINAR */}
-      {showEditModal && selectedCompra && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex justify-center items-center z-50 p-4 md:p-6 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-5xl w-full shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <div className="flex items-center gap-4">
-                <h3 className="font-bold text-slate-800 text-lg">Modificar Registro Guardado</h3>
-                <button type="button" onClick={() => handleDeleteExisting(selectedCompra.id, selectedCompra.ticket_url)} className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 transition">
-                  🗑️ Eliminar permanentemente
-                </button>
+            {gastoSeleccionado.url_comprobante && (
+              <div>
+                <h3 className="font-bold text-sm text-gray-700 mb-2">Documento Adjunto:</h3>
+                <iframe src={gastoSeleccionado.url_comprobante} className="w-full h-64 border rounded-xl" title="Comprobante Original" />
               </div>
-              <button onClick={() => setShowEditModal(false)} className="text-slate-400 hover:text-slate-600 text-xl font-medium p-1">✕</button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0">
-              <div className="bg-slate-100 rounded-xl p-3 border border-slate-200 flex flex-col justify-center items-center min-h-[250px] md:max-h-[550px] overflow-hidden">
-                {selectedCompra.ticket_url ? (
-                  selectedCompra.ticket_url.includes('.pdf') ? (
-                    <div className="text-center p-6">
-                      <p className="text-sm font-medium text-slate-700">Documento PDF del ticket</p>
-                      <a href={selectedCompra.ticket_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline mt-2 inline-block">Abrir PDF en pestaña nueva ↗</a>
-                    </div>
-                  ) : (
-                    <img src={selectedCompra.ticket_url} alt="Comprobante físico" className="max-w-full max-h-[480px] object-contain rounded-lg shadow-sm" />
-                  )
-                ) : (
-                  <p className="text-xs text-slate-400 italic">Este gasto no tiene un archivo físico asociado.</p>
-                )}
-              </div>
-
-              <div className="space-y-4 flex flex-col justify-between">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Establecimiento</label>
-                    <input type="text" value={selectedCompra.establecimiento || ''} onChange={(e) => setSelectedCompra({ ...selectedCompra, establecimiento: e.target.value })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha</label>
-                      <input type="date" value={selectedCompra.fecha || ''} onChange={(e) => setSelectedCompra({ ...selectedCompra, fecha: e.target.value })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoría</label>
-                      <select value={selectedCompra.categoria || 'Otros'} onChange={(e) => setSelectedCompra({ ...selectedCompra, categoria: e.target.value })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
-                        <option value="Supermercado">Supermercado</option>
-                        <option value="Restaurante">Restaurante</option>
-                        <option value="Tecnología">Tecnología</option>
-                        <option value="Ropa">Ropa</option>
-                        <option value="Transporte">Transporte</option>
-                        <option value="Entretenimiento">Entretenimiento</option>
-                        <option value="Hogar">Hogar</option>
-                        <option value="Otros">Otros</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Importe Total Acumulado (€)</label>
-                    <input type="number" step="0.01" value={selectedCompra.total || 0} onChange={(e) => setSelectedCompra({ ...selectedCompra, total: parseFloat(e.target.value) || 0 })} className="w-full px-4 py-2 border rounded-xl bg-slate-50 font-bold text-blue-600 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-                  </div>
-
-                  <div className="mt-4">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Desglose de Artículos</label>
-                    <div className="border rounded-xl max-h-[180px] overflow-y-auto bg-slate-50">
-                      {(!selectedCompra.items || selectedCompra.items.length === 0) ? (
-                        <p className="p-4 text-xs text-slate-400 italic text-center">Sin artículos detallados en este ticket.</p>
-                      ) : (
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-100 text-slate-500 sticky top-0 font-bold">
-                            <tr>
-                              <th className="p-2 w-7/12">Producto</th>
-                              <th className="p-2 w-2/12 text-center">Cant.</th>
-                              <th className="p-2 w-3/12 text-right">Precio Un.</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y bg-white">
-                            {selectedCompra.items.map((item: any, idx: number) => (
-                              <tr key={idx}>
-                                <td className="p-1"><input type="text" value={item.nombre || ''} onChange={(e) => handleEditItemChange(idx, 'nombre', e.target.value)} className="w-full px-1 py-0.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none" /></td>
-                                <td className="p-1"><input type="number" value={item.cantidad ?? 1} onChange={(e) => handleEditItemChange(idx, 'cantidad', parseInt(e.target.value) || 0)} className="w-full text-center px-1 py-0.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none" /></td>
-                                <td className="p-1"><input type="number" step="0.01" value={item.precio ?? 0} onChange={(e) => handleEditItemChange(idx, 'precio', parseFloat(e.target.value) || 0)} className="w-full text-right px-1 py-0.5 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded focus:outline-none font-medium" /></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t flex gap-3 justify-end bg-white">
-                  <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2 border rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancelar</button>
-                  <button type="button" onClick={handleUpdateExisting} className="px-5 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-md transition">Guardar Cambios</button>
-                </div>
-              </div>
-
-            </div>
+            )}
           </div>
         </div>
       )}

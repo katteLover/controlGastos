@@ -1,46 +1,48 @@
-// Perfil de usuario [cite: 8]
-export interface Profile {
+export interface ItemGasto {
+  id?: string;
+  gasto_id?: string;
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+  monto_total: number;
+  subcategoria: string; // Texto libre (ej. Lácteos, Carnicería, Herramientas, Calzado)
+}
+
+export interface Gasto {
   id: string;
-  full_name: string | null;
-  role: 'user' | 'admin';
+  created_at?: string;
+  fecha: string; // YYYY-MM-DD
+  comercio: string;
+  categoria_general: string;
+  monto_total: number;
+  moneda: string; // EUR
+  url_comprobante?: string;
+  user_id?: string;
+  items_gasto?: ItemGasto[];
 }
 
-// Registro de compra/ticket [cite: 14]
-export interface Purchase {
-  id: number;
-  user_id: string;
-  establecimiento: string;
-  fecha: string; // Formato YYYY-MM-DD
-  total: number;
-  moneda: string;
-  imagen_url: string | null;
-  created_at: string;
-  products_count?: number; // Campo calculado opcional para la tabla [cite: 56]
+export interface MetricaSubcategoria {
+  subcategoria: string;
+  montoTotal: number;
+  porcentaje: number;
+  cantidadItems: number;
 }
 
-// Detalle de los productos de un ticket [cite: 22]
-export interface Product {
-  id: number;
-  purchase_id: number;
-  nombre: string;
-  categoria: string;
+export interface ProductoRanking {
+  id: string;
+  descripcion: string;
+  subcategoria: string;
+  monto_total: number;
   precio_unitario: number;
   cantidad: number;
-  precio_total: number;
+  fecha: string;
+  comercio: string;
 }
 
-// Estado global para los filtros del dashboard [cite: 51]
-export interface FilterState {
-  startDate: string;
-  endDate: string;
-  categoria: string; // 'todas' o una específica [cite: 51]
-  busqueda: string;  // Filtro por establecimiento [cite: 51]
-}
-
-// Estadísticas para las tarjetas de resumen [cite: 49]
-export interface DashboardStats {
-  gastoTotal: number;
-  numTickets: number;
-  promedioDiario: number;
-  categoriaMasGastada: string;
+export interface EscaneoTicketResultado {
+  fecha: string;
+  comercio: string;
+  categoria_general: string;
+  monto_total: number;
+  items: Omit<ItemGasto, 'id' | 'gasto_id'>[];
 }

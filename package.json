@@ -25,6 +25,7 @@
     "react-dom": "^18.2.0",
     "recharts": "^2.15.4",
     "sonner": "^1.4.3",
+    "sweetalert2": "^11.26.25",
     "tailwind": "^4.0.0",
     "tailwind-merge": "^2.2.2"
   },
