@@ -25,30 +25,23 @@ export async function POST(req: NextRequest) {
     const base64Image = buffer.toString('base64');
 
     const prompt = `
-      Analiza la imagen de este ticket/factura y extrae los datos en formato JSON estricto.
-      
-      INSTRUCCIONES CLAVE:
-      1. Extrae CADA UNO de los productos/ítems listados en la compra.
-      2. Asigna una subcategoría coherente a cada producto (Ej: Lácteos, Bebidas, Frutas, Limpieza, Carnicería, Panadería, etc.).
-      3. Extrae la cantidad, precio unitario y monto total por ítem.
+Eres un experto en contabilidad. Analiza la imagen del ticket y extrae la información en formato JSON estricto.
 
-      Estructura JSON requerida:
-      {
-        "comercio": "Nombre del establecimiento",
-        "fecha": "YYYY-MM-DD",
-        "categoria_general": "Alimentación | Transporte | Hogar | Ocio | Salud | Otros",
-        "monto_total": 0.00,
-        "items": [
-          {
-            "descripcion": "Nombre del producto",
-            "subcategoria": "Subcategoría asignada",
-            "cantidad": 1,
-            "precio_unitario": 0.00,
-            "monto_total": 0.00
-          }
-        ]
-      }
-    `;
+REGLAS OBLIGATORIAS:
+1. "items": Debes listar cada fila de producto encontrada. Si un producto no tiene cantidad explícita, asume 1.
+2. "monto_total": Debe ser la suma exacta de los ítems.
+3. "subcategoria": Si no es evidente, infiérela basándote en la descripción del producto (ej: "Leche" -> "Lácteos").
+4. Formato: Solo devuelve el JSON puro, sin texto adicional, sin formato markdown.
+
+Estructura JSON:
+{
+  "comercio": "string",
+  "fecha": "YYYY-MM-DD",
+  "categoria_general": "Selecciona: Alimentación, Transporte, Hogar, Ocio, Salud, Otros",
+  "monto_total": number,
+  "items": [{ "descripcion": "string", "subcategoria": "string", "cantidad": number, "precio_unitario": number, "monto_total": number }]
+}
+`;
 
     // Llamada con el modelo gemini-3.1-flash-lite
     const response = await ai.models.generateContent({
