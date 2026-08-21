@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { supabaseClient } from '@/lib/supabaseClient';
+import { supabaseClient } from '@/lib/supabase-client';
 import UploadModal from '@/components/UploadModal';
 import Swal from 'sweetalert2';
 import {
