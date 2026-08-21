@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { Gasto, ItemGasto, MetricaSubcategoria, ProductoRanking } from '@/types';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
@@ -73,39 +73,9 @@ export default function DashboardPage() {
   
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Configuración de Interceptor Global de Alerts
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.alert = (msg: string) => {
-        Swal.fire({
-          title: 'Control de Gastos',
-          text: msg,
-          icon: 'info',
-          confirmButtonColor: '#2563eb',
-          confirmButtonText: 'Aceptar'
-        });
-      };
-
-      window.confirm = async (msg: string) => {
-        const res = await Swal.fire({
-          title: '¿Confirmar Acción?',
-          text: msg,
-          icon: 'warning',
-          showCancelButton: true,
-          confirmButtonColor: '#dc2626',
-          cancelButtonColor: '#4b5563',
-          confirmButtonText: 'Sí, continuar',
-          cancelButtonText: 'Cancelar'
-        });
-        return res.isConfirmed;
-      };
-    }
-  }, []);
-
   // Opciones dinámicas para el filtro Mes-Año
   const opcionesMeses = useMemo(() => {
     const mesesSet = new Set<string>();
-    // Incluir mes actual por defecto
     const hoy = new Date().toISOString().slice(0, 7);
     mesesSet.add(hoy);
     gastos.forEach(g => {
@@ -181,19 +151,39 @@ export default function DashboardPage() {
       .slice(0, 10);
   }, [itemsDelMes]);
 
-  // Eliminar un ticket con confirmación
+  // Eliminar un ticket con confirmación mediante SweetAlert2
   const handleEliminarGasto = async (id: string) => {
-    const seguro = await window.confirm("¿Deseas eliminar este comprobante y todos sus productos?");
-    if (seguro) {
+    const res = await Swal.fire({
+      title: '¿Confirmar Acción?',
+      text: '¿Deseas eliminar este comprobante y todos sus productos?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#dc2626',
+      cancelButtonColor: '#4b5563',
+      confirmButtonText: 'Sí, eliminar',
+      cancelButtonText: 'Cancelar'
+    });
+
+    if (res.isConfirmed) {
       setGastos(prev => prev.filter(g => g.id !== id));
-      alert("Comprobante eliminado con éxito.");
+      Swal.fire({
+        title: 'Eliminado',
+        text: 'Comprobante eliminado con éxito.',
+        icon: 'success',
+        confirmButtonColor: '#2563eb'
+      });
     }
   };
 
   // Exportar reporte completo a CSV
   const exportarCSV = () => {
     if (itemsDelMes.length === 0) {
-      alert("No hay productos registrados en el mes seleccionado para exportar.");
+      Swal.fire({
+        title: 'Atención',
+        text: 'No hay productos registrados en el mes seleccionado para exportar.',
+        icon: 'info',
+        confirmButtonColor: '#2563eb'
+      });
       return;
     }
 
