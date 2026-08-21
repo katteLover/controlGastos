@@ -54,18 +54,19 @@ export default function DashboardPage() {
   const [mesSeleccionado, setMesSeleccionado] = useState<string>('todos');
   const [gastoExpandido, setGastoExpandido] = useState<string | null>(null);
 
- const cargarGastos = async () => {
+const cargarGastos = async () => {
   setLoading(true);
   try {
+    // Especificamos la clave foránea exacta en la consulta
     const { data, error } = await supabaseClient
       .from('gastos')
-      .select('*, items_gasto(*)')
+      .select('*, items_gasto!fk_items_gasto_gastos(*)')
       .order('fecha', { ascending: false });
 
     if (error) {
-      console.error('Error detallado de Supabase:', error.message, error.details, error.hint);
+      console.error('Error al cargar gastos:', error.message);
       
-      // Fallback: si falla el join con items_gasto, intentar cargar solo los gastos
+      // Intentar consulta simple si falla la relación
       const { data: fallbackData } = await supabaseClient
         .from('gastos')
         .select('*')
@@ -76,7 +77,7 @@ export default function DashboardPage() {
       setGastos(data || []);
     }
   } catch (err: any) {
-    console.error('Error inesperado al cargar gastos:', err);
+    console.error('Error inesperado:', err);
   } finally {
     setLoading(false);
   }

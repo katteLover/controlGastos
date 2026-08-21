@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const apiKey = process.env.GEMINI_API_KEY || '';
+const ai = new GoogleGenAI({ apiKey });
 
 export async function POST(req: NextRequest) {
   try {
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'No se ha configurado la clave GEMINI_API_KEY en las variables de entorno.' },
+        { status: 500 }
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get('file') as File;
 
@@ -20,11 +28,11 @@ export async function POST(req: NextRequest) {
       Analiza la imagen de este ticket/factura y extrae los datos en formato JSON estricto.
       
       INSTRUCCIONES CLAVE:
-      1. Extrae CADA UNO de los productos/ítems listados.
+      1. Extrae CADA UNO de los productos/ítems listados en la compra.
       2. Asigna una subcategoría coherente a cada producto (Ej: Lácteos, Bebidas, Frutas, Limpieza, Carnicería, Panadería, etc.).
       3. Extrae la cantidad, precio unitario y monto total por ítem.
 
-      Estructura requerida:
+      Estructura JSON requerida:
       {
         "comercio": "Nombre del establecimiento",
         "fecha": "YYYY-MM-DD",
@@ -42,8 +50,9 @@ export async function POST(req: NextRequest) {
       }
     `;
 
+    // Llamada con el modelo gemini-3.1-flash-lite
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       contents: [
         prompt,
         {
@@ -60,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     const responseText = response.text || '';
     
-    // Limpieza de bloques de código Markdown en la respuesta
+    // Limpieza preventiva de etiquetas Markdown
     const cleanJsonText = responseText
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
@@ -71,9 +80,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: parsedData });
   } catch (error: any) {
-    console.error('Error procesando ticket en /api/scan-ticket:', error);
+    console.error('Error detallado en /api/scan-ticket:', error);
     return NextResponse.json(
-      { error: 'Error al escanear el ticket', details: error.message },
+      { error: error.message || 'Error al escanear el ticket', details: String(error) },
       { status: 500 }
     );
   }
