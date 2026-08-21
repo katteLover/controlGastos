@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-// Inicialización de la SDK oficial @google/genai
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export async function POST(req: NextRequest) {
@@ -18,10 +17,16 @@ export async function POST(req: NextRequest) {
     const base64Image = buffer.toString('base64');
 
     const prompt = `
-      Analiza la imagen de este ticket/factura y extrae los datos en formato JSON estricto.
-      No agregues bloques de código markdown ni texto adicional fuera del JSON.
+      Eres un experto en extracción de datos OCR de tickets y facturas.
+      Analiza detenidamente la imagen adjunta e identifica TODOS los productos e ítems comprados.
 
-      Estructura requerida:
+      INSTRUCCIONES CLAVE:
+      1. Extrae de forma exhaustiva CADA UNO de los productos listados en el ticket.
+      2. Para cada ítem, asigna una subcategoría coherente (Ej: Lácteos, Carnicería, Bebidas, Frutas/Verduras, Limpieza, Snacking, Panadería, Electrónica, etc.).
+      3. Asegúrate de calcular o extraer la cantidad, el precio unitario y el monto total de cada ítem.
+      4. Si no puedes leer la subcategoría exacta, asigna una lógica según el nombre del producto.
+
+      Responde ÚNICAMENTE con la siguiente estructura JSON válid:
       {
         "comercio": "Nombre del establecimiento",
         "fecha": "YYYY-MM-DD",
@@ -30,7 +35,7 @@ export async function POST(req: NextRequest) {
         "items": [
           {
             "descripcion": "Nombre del producto",
-            "subcategoria": "Ej. Lácteos, Bebidas, etc.",
+            "subcategoria": "Subcategoría estimada",
             "cantidad": 1,
             "precio_unitario": 0.00,
             "monto_total": 0.00
@@ -39,9 +44,8 @@ export async function POST(req: NextRequest) {
       }
     `;
 
-    // Llamada con la nueva SDK @google/genai
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-2.5-flash',
       contents: [
         prompt,
         {
@@ -51,11 +55,13 @@ export async function POST(req: NextRequest) {
           },
         },
       ],
+      config: {
+        responseMimeType: 'application/json',
+      },
     });
 
     const responseText = response.text || '';
-    const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsedData = JSON.parse(cleanJson);
+    const parsedData = JSON.parse(responseText);
 
     return NextResponse.json({ success: true, data: parsedData });
   } catch (error: any) {
