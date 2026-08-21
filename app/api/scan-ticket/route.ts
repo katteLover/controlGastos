@@ -17,16 +17,14 @@ export async function POST(req: NextRequest) {
     const base64Image = buffer.toString('base64');
 
     const prompt = `
-      Eres un experto en extracción de datos OCR de tickets y facturas.
-      Analiza detenidamente la imagen adjunta e identifica TODOS los productos e ítems comprados.
-
+      Analiza la imagen de este ticket/factura y extrae los datos en formato JSON estricto.
+      
       INSTRUCCIONES CLAVE:
-      1. Extrae de forma exhaustiva CADA UNO de los productos listados en el ticket.
-      2. Para cada ítem, asigna una subcategoría coherente (Ej: Lácteos, Carnicería, Bebidas, Frutas/Verduras, Limpieza, Snacking, Panadería, Electrónica, etc.).
-      3. Asegúrate de calcular o extraer la cantidad, el precio unitario y el monto total de cada ítem.
-      4. Si no puedes leer la subcategoría exacta, asigna una lógica según el nombre del producto.
+      1. Extrae CADA UNO de los productos/ítems listados.
+      2. Asigna una subcategoría coherente a cada producto (Ej: Lácteos, Bebidas, Frutas, Limpieza, Carnicería, Panadería, etc.).
+      3. Extrae la cantidad, precio unitario y monto total por ítem.
 
-      Responde ÚNICAMENTE con la siguiente estructura JSON válid:
+      Estructura requerida:
       {
         "comercio": "Nombre del establecimiento",
         "fecha": "YYYY-MM-DD",
@@ -35,7 +33,7 @@ export async function POST(req: NextRequest) {
         "items": [
           {
             "descripcion": "Nombre del producto",
-            "subcategoria": "Subcategoría estimada",
+            "subcategoria": "Subcategoría asignada",
             "cantidad": 1,
             "precio_unitario": 0.00,
             "monto_total": 0.00
@@ -61,11 +59,19 @@ export async function POST(req: NextRequest) {
     });
 
     const responseText = response.text || '';
-    const parsedData = JSON.parse(responseText);
+    
+    // Limpieza de bloques de código Markdown en la respuesta
+    const cleanJsonText = responseText
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    const parsedData = JSON.parse(cleanJsonText);
 
     return NextResponse.json({ success: true, data: parsedData });
   } catch (error: any) {
-    console.error('Error procesando ticket con Gemini:', error);
+    console.error('Error procesando ticket en /api/scan-ticket:', error);
     return NextResponse.json(
       { error: 'Error al escanear el ticket', details: error.message },
       { status: 500 }
