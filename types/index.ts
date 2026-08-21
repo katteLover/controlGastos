@@ -3,7 +3,7 @@ export interface Profile {
   email?: string;
   full_name?: string;
   nombre?: string;
-  role?: 'user' | 'admin'; // Tipo estricto requerido por app/admin/page.tsx
+  role?: 'user' | 'admin';
   is_admin?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -31,6 +31,10 @@ export interface Gasto {
   user_id?: string;
   items_gasto?: ItemGasto[];
 }
+
+// Aliases para compatibilidad con componentes en inglés/español
+export type Purchase = Gasto;
+export type PurchaseItem = ItemGasto;
 
 export interface MetricaSubcategoria {
   subcategoria: string;
