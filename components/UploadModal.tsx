@@ -1,486 +1,204 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { supabaseClient } from '@/lib/supabase-client';
 import Swal from 'sweetalert2';
 
-interface ItemEscaneado {
-  descripcion: string;
-  subcategoria: string;
-  cantidad: number;
-  precio_unitario: number;
-  monto_total: number;
-}
-
-interface DatosEscaneados {
-  comercio: string;
-  fecha: string;
-  categoria_general: string;
-  monto_total: number;
-  items: ItemEscaneado[];
-}
-
-interface Props {
+interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export default function UploadModal({ isOpen, onClose, onSuccess }: Props) {
-  const [paso, setPaso] = useState<'SELECCIONAR' | 'RECORTAR' | 'ANALIZANDO' | 'REVISAR'>('SELECCIONAR');
-  const [archivoOriginal, setArchivoOriginal] = useState<File | null>(null);
-  const [imagenUrl, setImagenUrl] = useState<string | null>(null);
-  
-  // Estado para recorte
-  const [crop, setCrop] = useState({ top: 5, bottom: 5, left: 5, right: 5 });
-  const [rotacion, setRotacion] = useState<number>(0);
-
-  // Datos extraídos por Gemini
-  const [datosEditables, setDatosEditables] = useState<DatosEscaneados | null>(null);
-  const [archivoFinalCropped, setArchivoFinalCropped] = useState<File | null>(null);
-  const [guardando, setGuardando] = useState(false);
-
-  const imageRef = useRef<HTMLImageElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) {
-      resetModal();
-    }
-  }, [isOpen]);
-
-  const resetModal = () => {
-    setPaso('SELECCIONAR');
-    setArchivoOriginal(null);
-    setImagenUrl(null);
-    setCrop({ top: 5, bottom: 5, left: 5, right: 5 });
-    setRotacion(0);
-    setDatosEditables(null);
-    setArchivoFinalCropped(null);
-    setGuardando(false);
-  };
+export default function UploadModal({ isOpen, onClose, onSuccess }: UploadModalProps) {
+  const [imagen, setImagen] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [procesando, setProcesando] = useState<boolean>(false);
+  const [pasoActual, setPasoActual] = useState<string>('');
 
   if (!isOpen) return null;
 
-  // Manejar selección de archivo
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      setArchivoOriginal(file);
-      setImagenUrl(URL.createObjectURL(file));
-      setPaso('RECORTAR');
+      setImagen(file);
+      setPreview(URL.createObjectURL(file));
     }
   };
 
-  // Función para procesar el recorte con Canvas HTML5
-  const generarImagenRecortada = (): Promise<File> => {
-    return new Promise((resolve, reject) => {
-      if (!imagenUrl || !imageRef.current) {
-        return reject('No hay imagen cargada');
-      }
+  const procesarYGuardarTicket = async () => {
+    if (!imagen) {
+      Swal.fire('Atención', 'Por favor selecciona o toma una foto del ticket.', 'warning');
+      return;
+    }
 
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = imagenUrl;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
+    setProcesando(true);
+    setPasoActual('Analizando ticket con IA y aplicando reglas de OCR...');
 
-        if (!ctx) return reject('No se pudo crear el contexto 2D');
-
-        // Dimensiones originales
-        const originalWidth = img.naturalWidth;
-        const originalHeight = img.naturalHeight;
-
-        // Bounding box de recorte
-        const cropX = (crop.left / 100) * originalWidth;
-        const cropY = (crop.top / 100) * originalHeight;
-        const cropW = originalWidth - cropX - ((crop.right / 100) * originalWidth);
-        const cropH = originalHeight - cropY - ((crop.bottom / 100) * originalHeight);
-
-        // Configurar canvas según rotación
-        if (rotacion % 180 !== 0) {
-          canvas.width = cropH;
-          canvas.height = cropW;
-        } else {
-          canvas.width = cropW;
-          canvas.height = cropH;
-        }
-
-        ctx.save();
-
-        // Aplicar rotación si aplica
-        if (rotacion === 90) {
-          ctx.translate(canvas.width, 0);
-          ctx.rotate((90 * Math.PI) / 180);
-        } else if (rotacion === 180) {
-          ctx.translate(canvas.width, canvas.height);
-          ctx.rotate((180 * Math.PI) / 180);
-        } else if (rotacion === 270) {
-          ctx.translate(0, canvas.height);
-          ctx.rotate((270 * Math.PI) / 180);
-        }
-
-        // Dibujar solo el área recortada
-        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-        ctx.restore();
-
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) return reject('Error al generar blob de la imagen');
-            const croppedFile = new File([blob], `ticket_cropped_${Date.now()}.jpg`, {
-              type: 'image/jpeg',
-            });
-            resolve(croppedFile);
-          },
-          'image/jpeg',
-          0.92
-        );
-      };
-      img.onerror = () => reject('Error al cargar la imagen');
-    });
-  };
-
-  // Enviar a Gemini 3.1 Flash Lite
-  const ejecutarEscaneo = async () => {
-    setPaso('ANALIZANDO');
     try {
-      const croppedFile = await generarImagenRecortada();
-      setArchivoFinalCropped(croppedFile);
-
-      const formData = new FormData();
-      formData.append('file', croppedFile);
-
-      const res = await fetch('/api/scan-ticket', {
-        method: 'POST',
-        body: formData,
+      // 1. Convertir la imagen a Base64 para enviarla a tu ruta de API o servicio de IA
+      const base64Image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(imagen);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = (error) => reject(error);
       });
 
-      const json = await res.json();
+      // 2. Llamada al endpoint de procesamiento (puedes ajustar la ruta según tu backend o Server Action)
+      const response = await fetch('/api/procesar-ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imagenBase64: base64Image }),
+      });
 
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || 'Error al analizar el ticket');
+      if (!response.ok) {
+        throw new Error('Error al procesar la imagen en el servidor.');
       }
 
-      setDatosEditables(json.data);
-      setPaso('REVISAR');
-    } catch (err: any) {
-      console.error(err);
-      Swal.fire('Error', err.message || 'Error al procesar la imagen con Gemini', 'error');
-      setPaso('RECORTAR');
-    }
-  };
+      const dataOCR = await response.json();
+      
+      // El JSON estructurado según el prompt experto: { gasto: {...}, items: [...] }
+      const { gasto, items } = dataOCR;
 
-  // Guardar en Supabase
-  const handleGuardarTicket = async () => {
-    if (!datosEditables) return;
-    setGuardando(true);
-
-    try {
-      let imagen_url = '';
-
-      // Subir imagen a Supabase Storage si está disponible
-      if (archivoFinalCropped) {
-        const fileExt = 'jpg';
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
-
-        const { data: uploadData, error: uploadError } = await supabaseClient.storage
-          .from('tickets')
-          .upload(fileName, archivoFinalCropped);
-
-        if (!uploadError && uploadData) {
-          const { data: publicUrlData } = supabaseClient.storage
-            .from('tickets')
-            .getPublicUrl(fileName);
-          imagen_url = publicUrlData.publicUrl;
-        }
+      if (!gasto || !items) {
+        throw new Error('La estructura devuelta por la IA no es válida.');
       }
 
-      // 1. Insertar ticket principal
-      const { data: gastoData, error: gastoError } = await supabaseClient
+      setPasoActual('Guardando comprobante e ítems en Supabase...');
+
+      // 3. Insertar el gasto principal en Supabase
+      const { data: gastoInsertado, error: errorGasto } = await supabaseClient
         .from('gastos')
-        .insert({
-          comercio: datosEditables.comercio,
-          fecha: datosEditables.fecha,
-          categoria_general: datosEditables.categoria_general,
-          monto_total: datosEditables.monto_total,
-          imagen_url: imagen_url || null,
-        })
+        .insert([
+          {
+            comercio: gasto.comercio,
+            categoria_general: gasto.categoria_general,
+            fecha: gasto.fecha,
+            monto_total: Number(gasto.monto_total),
+            moneda: gasto.moneda || 'EUR',
+          },
+        ])
         .select()
         .single();
 
-      if (gastoError) throw gastoError;
+      if (errorGasto) throw errorGasto;
 
-      // 2. Insertar ítems desglosados
-      if (datosEditables.items && datosEditables.items.length > 0) {
-        const itemsAInsertar = datosEditables.items.map((it) => ({
-          gasto_id: gastoData.id,
-          descripcion: it.descripcion,
-          subcategoria: it.subcategoria || 'General',
-          cantidad: it.cantidad || 1,
-          precio_unitario: it.precio_unitario || 0,
-          monto_total: it.monto_total || 0,
+      const gastoId = gastoInsertado.id;
+
+      // 4. Preparar e insertar los ítems asociados utilizando el ID del gasto
+      if (items && items.length > 0) {
+        const itemsAInsertar = items.map((item: any) => ({
+          gasto_id: gastoId,
+          descripcion: item.descripcion,
+          cantidad: Number(item.cantidad || 1.0),
+          precio_unitario: Number(item.precio_unitario || 0),
+          monto_total: Number(item.monto_total || 0),
+          subcategoria: item.subcategoria || 'Otros',
         }));
 
-        const { error: itemsError } = await supabaseClient
+        const { error: errorItems } = await supabaseClient
           .from('items_gasto')
           .insert(itemsAInsertar);
 
-        if (itemsError) console.error('Error al insertar items:', itemsError);
+        if (errorItems) throw errorItems;
       }
 
-      Swal.fire('¡Éxito!', 'El ticket se guardó correctamente.', 'success');
+      Swal.fire({
+        title: '¡Ticket procesado!',
+        text: `Se registró correctamente el gasto en ${gasto.comercio} (${gasto.monto_total} €).`,
+        icon: 'success',
+        timer: 2000,
+        showConfirmButton: false,
+      });
+
+      setImagen(null);
+      setPreview(null);
       onSuccess();
-    } catch (err: any) {
-      Swal.fire('Error', err.message || 'No se pudo guardar el ticket.', 'error');
+    } catch (error: any) {
+      console.error('Error en el flujo de escaneo:', error);
+      Swal.fire('Error', error.message || 'No se pudo completar el procesamiento del ticket.', 'error');
     } finally {
-      setGuardando(false);
+      setProcesando(false);
+      setPasoActual('');
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-gray-100">
         
-        {/* Cabecera */}
-        <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-          <h3 className="text-lg font-bold text-gray-900">
-            {paso === 'SELECCIONAR' && 'Escanear Nuevo Ticket'}
-            {paso === 'RECORTAR' && 'Ajustar y Recortar Ticket'}
-            {paso === 'ANALIZANDO' && 'Procesando con Gemini 3.1 Flash Lite...'}
-            {paso === 'REVISAR' && 'Confirmar Datos Extraídos'}
-          </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold p-1">
+        {/* Cabecera del Modal */}
+        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+          <h3 className="font-bold text-gray-800 text-lg">Escanear Ticket o Factura</h3>
+          <button
+            onClick={onClose}
+            disabled={procesando}
+            className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+          >
             ✕
           </button>
         </div>
 
-        {/* PASO 1: Seleccionar Imagen */}
-        {paso === 'SELECCIONAR' && (
-          <div className="py-8 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-xl my-4 bg-gray-50 text-center">
-            <span className="text-4xl mb-2">📸</span>
-            <p className="text-sm font-semibold text-gray-700">Selecciona o toma una foto del ticket</p>
-            <p className="text-xs text-gray-400 mt-1">Soporta JPG, PNG o capturas móviles</p>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFileChange}
-              className="mt-4 text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
-            />
-          </div>
-        )}
-
-        {/* PASO 2: Recortar y Rotar */}
-        {paso === 'RECORTAR' && imagenUrl && (
-          <div className="py-4 space-y-4">
-            <p className="text-xs text-gray-500">
-              Ajusta los márgenes para aislar únicamente el ticket. Esto mejorará la precisión de la lectura IA.
-            </p>
-
-            <div className="relative border rounded-lg bg-gray-900 overflow-hidden flex justify-center items-center max-h-[350px]">
-              <img
-                ref={imageRef}
-                src={imagenUrl}
-                alt="Original"
-                style={{
-                  transform: `rotate(${rotacion}deg)`,
-                  maxHeight: '350px',
-                  objectFit: 'contain',
-                  filter: 'brightness(0.95)',
-                }}
+        {/* Cuerpo del Modal */}
+        <div className="p-6 space-y-4">
+          {!preview ? (
+            <label className="border-2 border-dashed border-gray-300 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500 transition bg-gray-50/50 group">
+              <span className="text-3xl mb-2 group-hover:scale-110 transition">📄</span>
+              <span className="text-sm font-semibold text-gray-700">Sube o arrastra tu ticket aquí</span>
+              <span className="text-xs text-gray-400 mt-1">Formatos soportados: PNG, JPG, WEBP</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
               />
-              
-              {/* Box con overlay de recorte */}
-              <div
-                className="absolute border-2 border-amber-400 bg-amber-400/20 pointer-events-none rounded"
-                style={{
-                  top: `${crop.top}%`,
-                  bottom: `${crop.bottom}%`,
-                  left: `${crop.left}%`,
-                  right: `${crop.right}%`,
-                }}
-              />
+            </label>
+          ) : (
+            <div className="space-y-3">
+              <div className="relative w-full h-52 bg-black rounded-xl overflow-hidden flex items-center justify-center border border-gray-200">
+                <img src={preview} alt="Vista previa" className="max-h-full object-contain" />
+              </div>
+              {!procesando && (
+                <button
+                  onClick={() => {
+                    setImagen(null);
+                    setPreview(null);
+                  }}
+                  className="w-full text-xs text-indigo-600 hover:underline font-medium text-center"
+                >
+                  Cambiar imagen seleccionada
+                </button>
+              )}
             </div>
+          )}
 
-            {/* Controles de Margen y Rotación */}
-            <div className="grid grid-cols-2 gap-3 text-xs bg-gray-50 p-3 rounded-xl border border-gray-100">
-              <div>
-                <label className="font-semibold text-gray-600 block">Margen Superior: {crop.top}%</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="40"
-                  value={crop.top}
-                  onChange={(e) => setCrop({ ...crop, top: Number(e.target.value) })}
-                  className="w-full accent-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-600 block">Margen Inferior: {crop.bottom}%</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="40"
-                  value={crop.bottom}
-                  onChange={(e) => setCrop({ ...crop, bottom: Number(e.target.value) })}
-                  className="w-full accent-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-600 block">Margen Izquierdo: {crop.left}%</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="40"
-                  value={crop.left}
-                  onChange={(e) => setCrop({ ...crop, left: Number(e.target.value) })}
-                  className="w-full accent-indigo-600"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-600 block">Margen Derecho: {crop.right}%</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="40"
-                  value={crop.right}
-                  onChange={(e) => setCrop({ ...crop, right: Number(e.target.value) })}
-                  className="w-full accent-indigo-600"
-                />
-              </div>
+          {procesando && (
+            <div className="space-y-2 text-center py-2">
+              <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-indigo-600 border-t-transparent"></div>
+              <p className="text-xs font-medium text-indigo-600">{pasoActual}</p>
             </div>
+          )}
+        </div>
 
-            <div className="flex justify-between items-center">
-              <button
-                onClick={() => setRotacion((rotacion + 90) % 360)}
-                className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1"
-              >
-                🔄 Rotar 90°
-              </button>
-
-              <button
-                onClick={ejecutarEscaneo}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg transition shadow"
-              >
-                ✨ Recortar y Analizar
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* PASO 3: Estado Analizando */}
-        {paso === 'ANALIZANDO' && (
-          <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
-            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm font-semibold text-gray-800">Gemini 3.1 Flash Lite está procesando la compra...</p>
-            <p className="text-xs text-gray-400">Extrayendo ítems, subcategorías y precios unitarios.</p>
-          </div>
-        )}
-
-        {/* PASO 4: Revisar y Confirmar Datos */}
-        {paso === 'REVISAR' && datosEditables && (
-          <div className="py-4 space-y-4">
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="font-semibold text-gray-600">Comercio</label>
-                <input
-                  type="text"
-                  value={datosEditables.comercio}
-                  onChange={(e) => setDatosEditables({ ...datosEditables, comercio: e.target.value })}
-                  className="w-full p-2 border rounded-lg mt-1 font-medium"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-600">Fecha</label>
-                <input
-                  type="date"
-                  value={datosEditables.fecha}
-                  onChange={(e) => setDatosEditables({ ...datosEditables, fecha: e.target.value })}
-                  className="w-full p-2 border rounded-lg mt-1 font-medium"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-600">Categoría General</label>
-                <input
-                  type="text"
-                  value={datosEditables.categoria_general}
-                  onChange={(e) => setDatosEditables({ ...datosEditables, categoria_general: e.target.value })}
-                  className="w-full p-2 border rounded-lg mt-1 font-medium"
-                />
-              </div>
-              <div>
-                <label className="font-semibold text-gray-600">Monto Total (€)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={datosEditables.monto_total}
-                  onChange={(e) => setDatosEditables({ ...datosEditables, monto_total: Number(e.target.value) })}
-                  className="w-full p-2 border rounded-lg mt-1 font-bold text-indigo-600"
-                />
-              </div>
-            </div>
-
-            {/* Ítems extraídos */}
-            <div className="space-y-2">
-              <p className="text-xs font-bold text-gray-700">Ítems extraídos ({datosEditables.items.length}):</p>
-              <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 border rounded-xl p-2 bg-gray-50">
-                {datosEditables.items.map((item, idx) => (
-                  <div key={idx} className="py-1.5 grid grid-cols-12 gap-1 items-center text-xs">
-                    <input
-                      type="text"
-                      value={item.descripcion}
-                      onChange={(e) => {
-                        const newItems = [...datosEditables.items];
-                        newItems[idx].descripcion = e.target.value;
-                        setDatosEditables({ ...datosEditables, items: newItems });
-                      }}
-                      className="col-span-5 p-1 border rounded bg-white text-xs"
-                      placeholder="Producto"
-                    />
-                    <input
-                      type="text"
-                      value={item.subcategoria}
-                      onChange={(e) => {
-                        const newItems = [...datosEditables.items];
-                        newItems[idx].subcategoria = e.target.value;
-                        setDatosEditables({ ...datosEditables, items: newItems });
-                      }}
-                      className="col-span-4 p-1 border rounded bg-white text-xs"
-                      placeholder="Subcategoría"
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.monto_total}
-                      onChange={(e) => {
-                        const newItems = [...datosEditables.items];
-                        newItems[idx].monto_total = Number(e.target.value);
-                        setDatosEditables({ ...datosEditables, items: newItems });
-                      }}
-                      className="col-span-3 p-1 border rounded bg-white text-xs font-bold text-right"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
-              <button
-                onClick={() => setPaso('RECORTAR')}
-                className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-semibold rounded-lg"
-              >
-                Volver
-              </button>
-              <button
-                onClick={handleGuardarTicket}
-                disabled={guardando}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg shadow"
-              >
-                {guardando ? 'Guardando...' : '💾 Confirmar y Guardar'}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Pie del Modal */}
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={procesando}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-200/60 transition"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={procesarYGuardarTicket}
+            disabled={!imagen || procesando}
+            className="px-5 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            {procesando ? 'Procesando...' : 'Analizar y Guardar'}
+          </button>
+        </div>
 
       </div>
     </div>
