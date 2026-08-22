@@ -46,8 +46,8 @@ export default function DashboardPage() {
       // Intentamos primero con la relación integrada
       const { data, error } = await supabaseClient
         .from('gastos')
-        .select('*, items_gasto(*)')
-        .order('fecha', { ascending: false });
+        .select('*, items_gasto:items_gasto(gasto_id(*))') // o usa el nombre exacto de tu FK
+  .order('fecha', { ascending: false });
 
       if (error) {
         console.warn('Advertencia con relación de ítems, cargando tabla base:', error.message);
