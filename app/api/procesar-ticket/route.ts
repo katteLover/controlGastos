@@ -11,9 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No se proporcionó ninguna imagen' }, { status: 400 });
     }
 
-    // Extraer el tipo MIME correcto (por ejemplo, image/jpeg, image/png) y el contenido base64
     const matches = imagenBase64.match(/^data:(image\/[a-zA-Z+-]+);base64,(.+)$/);
-    
     let mimeType = 'image/jpeg';
     let base64Data = imagenBase64;
 
@@ -21,7 +19,6 @@ export async function POST(request: Request) {
       mimeType = matches[1];
       base64Data = matches[2];
     } else {
-      // Si viene limpio sin prefijo data:image
       base64Data = imagenBase64.replace(/^data:image\/\w+;base64,/, '');
     }
 
@@ -58,17 +55,23 @@ Estructura de salida JSON obligatoria:
   ]
 }`;
 
+    // Estructura oficial requerida por @google/genai para envíos multimodales
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
         {
-          inlineData: {
-            data: base64Data,
-            mimeType: mimeType,
-          },
-        },
-        {
-          text: 'Extrae la información de este ticket siguiendo estrictamente las reglas de estructura JSON indicadas.',
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType,
+              },
+            },
+            {
+              text: 'Extrae la información de este ticket siguiendo estrictamente las reglas de estructura JSON indicadas.',
+            },
+          ],
         },
       ],
       config: {
