@@ -1,81 +1,94 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'No se ha configurado la clave GEMINI_API_KEY en las variables de entorno.' },
-        { status: 500 }
-      );
+    const { imagenBase64 } = await request.json();
+
+    if (!imagenBase64) {
+      return NextResponse.json({ error: 'No se proporcionó ninguna imagen' }, { status: 400 });
     }
 
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
+    // Extraer el tipo MIME correcto (por ejemplo, image/jpeg, image/png) y el contenido base64
+    const matches = imagenBase64.match(/^data:(image\/[a-zA-Z+-]+);base64,(.+)$/);
+    
+    let mimeType = 'image/jpeg';
+    let base64Data = imagenBase64;
 
-    if (!file) {
-      return NextResponse.json({ error: 'No se ha subido ningún archivo' }, { status: 400 });
+    if (matches && matches.length === 3) {
+      mimeType = matches[1];
+      base64Data = matches[2];
+    } else {
+      // Si viene limpio sin prefijo data:image
+      base64Data = imagenBase64.replace(/^data:image\/\w+;base64,/, '');
     }
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-    const base64Image = buffer.toString('base64');
+    const systemInstruction = `Actúa como un sistema experto de OCR y estructuración de datos para Supabase (PostgreSQL). Tu tarea es extraer la información de la imagen del ticket adjunto y devolver un objeto JSON estricto que se ajuste exactamente a las columnas de mis tablas gastos e items_gasto.
 
-    const prompt = `
-Eres un experto en contabilidad. Analiza la imagen del ticket y extrae la información en formato JSON estricto.
+Reglas de procesamiento:
+1. Agrupación de Modificadores: Si encuentras líneas adicionales que corresponden a un modificador (ej: "CON HIELO", "Doble carne") debajo de un producto, NO los crees como ítems separados. Anéxalos al nombre del producto principal en el campo "descripcion" (ej: "SOLO + CON HIELO").
+2. Inferencia Dinámica:
+   - Asigna una "categoria_general" al comercio basándote en su nombre y productos (Ej: "Restaurante", "Supermercado", "Bazar").
+   - Asigna una "subcategoria" a cada ítem basándote en la lógica del producto (Ej: "Bebidas", "Comidas"). Si no estás seguro, usa "Otros".
+3. Formateo de Datos para SQL:
+   - "fecha": formato estándar YYYY-MM-DD. Si el ticket tiene hora, ignora la hora o usa solo la fecha del ticket.
+   - "monto_total" y precios: deben ser números (float) con dos decimales y sin símbolos de moneda (ej: 100.40, no "100,40 €").
+   - "cantidad": si no es explícita, asume 1.00.
+   - No incluyas explicaciones, saludos ni texto fuera del bloque JSON.
 
-REGLAS OBLIGATORIAS:
-1. "items": Debes listar cada fila de producto encontrada. Si un producto no tiene cantidad explícita, asume 1.
-2. "monto_total": Debe ser la suma exacta de los ítems.
-3. "subcategoria": Si no es evidente, infiérela basándote en la descripción del producto (ej: "Leche" -> "Lácteos").
-4. Formato: Solo devuelve el JSON puro, sin texto adicional, sin formato markdown.
-
-Estructura JSON:
+Estructura de salida JSON obligatoria:
 {
-  "comercio": "string",
-  "fecha": "YYYY-MM-DD",
-  "categoria_general": "Selecciona: Alimentación, Transporte, Hogar, Ocio, Salud, Otros",
-  "monto_total": number,
-  "items": [{ "descripcion": "string", "subcategoria": "string", "cantidad": number, "precio_unitario": number, "monto_total": number }]
-}
-`;
+  "gasto": {
+    "comercio": "string (nombre del establecimiento)",
+    "categoria_general": "string",
+    "fecha": "YYYY-MM-DD",
+    "monto_total": 0.00,
+    "moneda": "EUR"
+  },
+  "items": [
+    {
+      "descripcion": "string (producto + modificadores si los hay)",
+      "cantidad": 1.00,
+      "precio_unitario": 0.00,
+      "monto_total": 0.00,
+      "subcategoria": "string"
+    }
+  ]
+}`;
 
-    // Llamada con el modelo gemini-3.1-flash-lite
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-2.5-flash',
       contents: [
-        prompt,
         {
           inlineData: {
-            data: base64Image,
-            mimeType: file.type || 'image/jpeg',
+            data: base64Data,
+            mimeType: mimeType,
           },
+        },
+        {
+          text: 'Extrae la información de este ticket siguiendo estrictamente las reglas de estructura JSON indicadas.',
         },
       ],
       config: {
+        systemInstruction: systemInstruction,
         responseMimeType: 'application/json',
       },
     });
 
-    const responseText = response.text || '';
-    
-    // Limpieza preventiva de etiquetas Markdown
-    const cleanJsonText = responseText
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
+    const textoRespuesta = response.text;
+    if (!textoRespuesta) {
+      throw new Error('La IA no devolvió ninguna respuesta.');
+    }
 
-    const parsedData = JSON.parse(cleanJsonText);
+    const datosEstructurados = JSON.parse(textoRespuesta);
 
-    return NextResponse.json({ success: true, data: parsedData });
+    return NextResponse.json(datosEstructurados);
   } catch (error: any) {
-    console.error('Error detallado en /api/scan-ticket:', error);
+    console.error('Error detallado procesando ticket en API:', error);
     return NextResponse.json(
-      { error: error.message || 'Error al escanear el ticket', details: String(error) },
+      { error: error.message || 'Error interno al procesar la imagen' },
       { status: 500 }
     );
   }

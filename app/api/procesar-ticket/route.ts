@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
-// Inicializa el cliente de Gemini (asegúrate de tener GEMINI_API_KEY en tu .env.local)
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(request: Request) {
@@ -12,11 +11,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No se proporcionó ninguna imagen' }, { status: 400 });
     }
 
-    // Limpiar el prefijo data:image/...;base64, si lo trae
-    const base64Data = imagenBase64.replace(/^data:image\/\w+;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
+    // Extraer el tipo MIME correcto (por ejemplo, image/jpeg, image/png) y el contenido base64
+    const matches = imagenBase64.match(/^data:(image\/[a-zA-Z+-]+);base64,(.+)$/);
+    
+    let mimeType = 'image/jpeg';
+    let base64Data = imagenBase64;
 
-    // Prompt experto que proporcionaste
+    if (matches && matches.length === 3) {
+      mimeType = matches[1];
+      base64Data = matches[2];
+    } else {
+      // Si viene limpio sin prefijo data:image
+      base64Data = imagenBase64.replace(/^data:image\/\w+;base64,/, '');
+    }
+
     const systemInstruction = `Actúa como un sistema experto de OCR y estructuración de datos para Supabase (PostgreSQL). Tu tarea es extraer la información de la imagen del ticket adjunto y devolver un objeto JSON estricto que se ajuste exactamente a las columnas de mis tablas gastos e items_gasto.
 
 Reglas de procesamiento:
@@ -50,14 +58,13 @@ Estructura de salida JSON obligatoria:
   ]
 }`;
 
-    // Llamada a Gemini utilizando el modelo multimodal adecuado
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
         {
           inlineData: {
-            data: buffer.toString('base64'),
-            mimeType: 'image/jpeg', // O el tipo de imagen correspondiente
+            data: base64Data,
+            mimeType: mimeType,
           },
         },
         {
@@ -66,7 +73,7 @@ Estructura de salida JSON obligatoria:
       ],
       config: {
         systemInstruction: systemInstruction,
-        responseMimeType: 'application/json', // Forzar respuesta estrictamente en JSON
+        responseMimeType: 'application/json',
       },
     });
 
@@ -75,11 +82,14 @@ Estructura de salida JSON obligatoria:
       throw new Error('La IA no devolvió ninguna respuesta.');
     }
 
-    const datosEstrucutrados = JSON.parse(textoRespuesta);
+    const datosEstructurados = JSON.parse(textoRespuesta);
 
-    return NextResponse.json(datosEstrucutrados);
+    return NextResponse.json(datosEstructurados);
   } catch (error: any) {
-    console.error('Error procesando ticket en API:', error);
-    return NextResponse.json({ error: error.message || 'Error interno al procesar la imagen' }, { status: 500 });
+    console.error('Error detallado procesando ticket en API:', error);
+    return NextResponse.json(
+      { error: error.message || 'Error interno al procesar la imagen' },
+      { status: 500 }
+    );
   }
 }
