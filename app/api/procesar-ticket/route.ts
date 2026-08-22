@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 
+// Inicialización de la SDK oficial
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(request: Request) {
@@ -8,9 +9,17 @@ export async function POST(request: Request) {
     const { imagenBase64 } = await request.json();
 
     if (!imagenBase64) {
-      return NextResponse.json({ error: 'No se proporcionó ninguna imagen' }, { status: 400 });
+      return NextResponse.json({ error: 'No se proporcionó ninguna imagen.' }, { status: 400 });
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json(
+        { error: 'Falta la variable GEMINI_API_KEY en tu archivo .env.local' },
+        { status: 500 }
+      );
+    }
+
+    // Extraer base64 y tipo mime
     const matches = imagenBase64.match(/^data:(image\/[a-zA-Z+-]+);base64,(.+)$/);
     let mimeType = 'image/jpeg';
     let base64Data = imagenBase64;
@@ -55,14 +64,14 @@ Estructura de salida JSON obligatoria:
   ]
 }`;
 
-    // Estructura oficial validada para @google/genai
+    // Llamada con la estructura soportada por @google/genai
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
         {
           inlineData: {
-            data: base64Data,
             mimeType: mimeType,
+            data: base64Data,
           },
         },
         'Extrae la información de este ticket siguiendo estrictamente las reglas de estructura JSON indicadas.',
@@ -75,7 +84,7 @@ Estructura de salida JSON obligatoria:
 
     const textoRespuesta = response.text;
     if (!textoRespuesta) {
-      throw new Error('La IA no devolvió ninguna respuesta.');
+      throw new Error('La IA no devolvió ningún contenido.');
     }
 
     const datosEstructurados = JSON.parse(textoRespuesta);
