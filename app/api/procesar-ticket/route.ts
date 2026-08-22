@@ -55,24 +55,17 @@ Estructura de salida JSON obligatoria:
   ]
 }`;
 
-    // Estructura oficial requerida por @google/genai para envíos multimodales
+    // Estructura oficial validada para @google/genai
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
         {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType: mimeType,
-              },
-            },
-            {
-              text: 'Extrae la información de este ticket siguiendo estrictamente las reglas de estructura JSON indicadas.',
-            },
-          ],
+          inlineData: {
+            data: base64Data,
+            mimeType: mimeType,
+          },
         },
+        'Extrae la información de este ticket siguiendo estrictamente las reglas de estructura JSON indicadas.',
       ],
       config: {
         systemInstruction: systemInstruction,
